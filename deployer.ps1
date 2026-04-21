@@ -1,15 +1,15 @@
 #Requires -Version 5.1
 # =============================================================================
-#  SOFTWARE - PC build validation toolkit (v3.1.0)
+#  PC BUILD TOOLKIT (v1.0.1)
 #  - Self-elevating PowerShell + WPF
 #  - Multi-source installers (winget / choco / direct / zip)
-#  - Pre-flight checks, progress bar, uninstall, bench report, self-update
+#  - Streaming download with live progress + content validation
 #
 #  Launch locally:  powershell -ExecutionPolicy Bypass -File .\deployer.ps1
-#  Launch from web: irm fay.digital/pbt | iex
+#  Launch from web: irm https://fay.digital/pbt | iex
 # =============================================================================
 
-$SCRIPT_VERSION = 'v1.0.0'
+$SCRIPT_VERSION = 'v1.0.1'
 $SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/fay-digital/pc-build-toolkit/main/deployer.ps1'
 
 # --- Self-elevate if not admin -----------------------------------------------
@@ -25,24 +25,16 @@ if (-not $isAdmin) {
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
 # --- App catalog -------------------------------------------------------------
-# Source types:
-#   'winget' -> winget install --id <Id>
-#   'choco'  -> choco install <Id> -y (bootstraps Chocolatey if missing)
-#   'direct' -> download installer from DownloadUrl, run silently with SilentArgs
-#   'zip'    -> download a zip, extract, run SetupExecutable silently
-#               (use when the installer needs sibling files like DLCs)
-#   direct/zip uninstall uses registry lookup against UninstallRegistryMatch
 $script:AppCatalog = @(
     @{ Id='FinalWire.AIDA64.Extreme';        Name='AIDA64 Extreme';  Category='Diagnostics'; Source='winget' }
     @{ Id='REALiX.HWiNFO';                   Name='HWiNFO';          Category='Diagnostics'; Source='winget' }
     @{ Id='CrystalDewWorld.CrystalDiskMark'; Name='CrystalDiskMark'; Category='Benchmark';   Source='winget' }
     @{ Id='Maxon.CinebenchR23';              Name='Cinebench R23';   Category='Benchmark';   Source='winget' }
     @{ Id='3dmark-bundled';                  Name='3DMark (Steel Nomad)'; Category='Benchmark'; Source='zip'
-       DownloadUrl='https://github.com/fay-digital/pc-build-toolkit/releases/tag/v1.0.0'
+       DownloadUrl='https://github.com/fay-digital/pc-build-toolkit/releases/download/v1.0.0/3dmark-bundle.zip'
        SetupExecutable='3dmark-setup.exe'
        SilentArgs='/S'
        UninstallRegistryMatch='3DMark' }
-    # Extras (unchecked by default; verify IDs with: winget search <n>)
     @{ Id='Geeks3D.FurMark.2'; Name='FurMark 2'; Category='GPU stress';  Source='winget' }
     @{ Id='OCCT.OCCT';         Name='OCCT';      Category='Stability';   Source='winget' }
     @{ Id='CPUID.CPU-Z';       Name='CPU-Z';     Category='Info';        Source='winget' }
@@ -59,7 +51,7 @@ $script:DefaultChecked = @(
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Software" Height="760" Width="960"
+        Title="PC Build Toolkit" Height="760" Width="960"
         WindowStartupLocation="CenterScreen" Background="#0F1115">
     <Window.Resources>
         <Style TargetType="CheckBox">
@@ -84,8 +76,8 @@ $script:DefaultChecked = @(
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0">
-                <TextBlock Text="SOFTWARE" FontSize="22" FontWeight="Bold"/>
-                <TextBlock Text="PC build validation toolkit" Foreground="#7F8793" FontSize="12"/>
+                <TextBlock Text="PC BUILD TOOLKIT" FontSize="22" FontWeight="Bold"/>
+                <TextBlock Text="Build validation deployer" Foreground="#7F8793" FontSize="12"/>
             </StackPanel>
             <TextBlock Grid.Column="1" Name="VersionLabel" Text="" Foreground="#7F8793"
                        FontSize="11" VerticalAlignment="Bottom"/>
@@ -181,7 +173,7 @@ $sync.Progress       = $controls.ProgressBar
 $sync.ProgressPct    = $controls.ProgressPct
 $sync.BtnRun         = $controls.BtnRun
 $sync.BtnUninst      = $controls.BtnUninstall
-$sync.LogPath        = Join-Path $env:TEMP 'software.log'
+$sync.LogPath        = Join-Path $env:TEMP 'pcbt.log'
 $sync.AppCatalog     = $script:AppCatalog
 $sync.Mode           = $null
 $sync.SelectedApps   = @()
@@ -273,6 +265,21 @@ function Write-UiLog {
         $sync.LogScroll.ScrollToBottom()
     })
 }
+# In-place log update (replaces the last line instead of appending).
+# Used for download progress so the log doesn't flood with 1000s of lines.
+function Write-UiLogReplace {
+    param([string]$Message)
+    $stamp = Get-Date -Format 'HH:mm:ss'
+    $line  = "[$stamp] [INFO] $Message"
+    $sync.Log.Dispatcher.Invoke([action]{
+        $text = $sync.Log.Text
+        if ($text.EndsWith("`n")) { $text = $text.Substring(0, $text.Length - 1) }
+        $lastNewline = $text.LastIndexOf("`n")
+        if ($lastNewline -ge 0) { $text = $text.Substring(0, $lastNewline + 1) } else { $text = '' }
+        $sync.Log.Text = $text + $line + "`n"
+        $sync.LogScroll.ScrollToBottom()
+    })
+}
 function Set-UiStatus   { param([string]$t) $sync.Status.Dispatcher.Invoke([action]{ $sync.Status.Text = $t }) }
 function Set-UiProgress {
     param([double]$v)
@@ -290,6 +297,117 @@ function Set-UiBusy {
 }
 function Add-Result { param($App, $Action, $Status, $Detail='')
     $sync.RunResults += [pscustomobject]@{ App=$App.Name; Action=$Action; Status=$Status; Detail=$Detail }
+}
+
+# --- Streaming download with progress ---------------------------------------
+# Uses HttpClient for streaming (Invoke-WebRequest buffers the whole response
+# into memory, which is useless for a 1.4 GB file and gives no progress).
+# Validates Content-Type and expected size before returning success.
+function Invoke-StreamingDownload {
+    param(
+        [Parameter(Mandatory)][string]$Url,
+        [Parameter(Mandatory)][string]$OutFile,
+        [string]$AppName = 'file'
+    )
+
+    Add-Type -AssemblyName System.Net.Http
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
+
+    $handler = New-Object System.Net.Http.HttpClientHandler
+    $handler.AllowAutoRedirect = $true
+    $client = New-Object System.Net.Http.HttpClient($handler)
+    $client.Timeout = [TimeSpan]::FromMinutes(30)
+
+    try {
+        $response = $client.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+
+        if (-not $response.IsSuccessStatusCode) {
+            throw "HTTP $([int]$response.StatusCode) $($response.ReasonPhrase)"
+        }
+
+        # Reject obvious non-binary responses (HTML error pages, JSON, etc.)
+        $ct = $response.Content.Headers.ContentType
+        if ($ct) {
+            $mt = $ct.MediaType
+            if ($mt -match '^(text/|application/json|application/xml)') {
+                throw "Server returned $mt (likely an error page, not a file). Check the URL."
+            }
+        }
+
+        $totalBytes = $response.Content.Headers.ContentLength
+        $totalMB    = if ($totalBytes) { [Math]::Round($totalBytes / 1MB, 1) } else { $null }
+
+        if ($totalBytes) {
+            Write-UiLog "Downloading $AppName ($totalMB MB)..."
+        } else {
+            Write-UiLog "Downloading $AppName (size unknown)..."
+        }
+
+        $sourceStream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        $destStream   = [System.IO.File]::Create($OutFile)
+        $buffer       = New-Object byte[] (1MB)
+        $totalRead    = 0L
+        $lastReport   = [DateTime]::UtcNow
+        $startTime    = [DateTime]::UtcNow
+        $firstLine    = $true
+
+        try {
+            while ($true) {
+                $read = $sourceStream.Read($buffer, 0, $buffer.Length)
+                if ($read -le 0) { break }
+                $destStream.Write($buffer, 0, $read)
+                $totalRead += $read
+
+                $now = [DateTime]::UtcNow
+                if (($now - $lastReport).TotalMilliseconds -ge 1000) {
+                    $elapsed = ($now - $startTime).TotalSeconds
+                    $speedMB = if ($elapsed -gt 0) { [Math]::Round(($totalRead / 1MB) / $elapsed, 1) } else { 0 }
+                    $doneMB  = [Math]::Round($totalRead / 1MB, 1)
+
+                    if ($totalBytes) {
+                        $pct = ($totalRead / $totalBytes) * 100
+                        $msg = "Downloading ${AppName}: $doneMB / $totalMB MB ({0:N1}%) - $speedMB MB/s" -f $pct
+                        Set-UiProgress $pct
+                    } else {
+                        $msg = "Downloading ${AppName}: $doneMB MB - $speedMB MB/s"
+                    }
+
+                    if ($firstLine) { Write-UiLog $msg; $firstLine = $false }
+                    else            { Write-UiLogReplace $msg }
+                    $lastReport = $now
+                }
+            }
+        }
+        finally {
+            $destStream.Flush()
+            $destStream.Close()
+            $sourceStream.Close()
+        }
+
+        if ($totalBytes -and $totalRead -ne $totalBytes) {
+            throw "Download truncated: got $totalRead bytes, expected $totalBytes."
+        }
+
+        $finalMB = [Math]::Round($totalRead / 1MB, 1)
+        Write-UiLog "Download complete: $finalMB MB." 'OK'
+    }
+    finally {
+        $client.Dispose()
+        $handler.Dispose()
+    }
+}
+
+# Verify the first 4 bytes look like a zip ('PK\x03\x04').
+function Test-IsZipFile {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return $false }
+    try {
+        $fs = [System.IO.File]::OpenRead($Path)
+        $hdr = New-Object byte[] 4
+        $n = $fs.Read($hdr, 0, 4)
+        $fs.Close()
+        return ($n -eq 4 -and $hdr[0] -eq 0x50 -and $hdr[1] -eq 0x4B -and $hdr[2] -eq 0x03 -and $hdr[3] -eq 0x04)
+    } catch { return $false }
 }
 
 function Test-ChocoInstalled { [bool](Get-Command choco.exe -ErrorAction SilentlyContinue) }
@@ -348,15 +466,14 @@ function Invoke-ChocoUninstall { param($App)
 # --- direct download + silent install ---
 function Invoke-DirectInstall { param($App)
     if (-not $App.DownloadUrl) { Write-UiLog "$($App.Name): no DownloadUrl." 'ERROR'; Add-Result $App 'install' 'FAIL' 'no URL'; return }
-    $tmp = Join-Path $env:TEMP ("sw_" + [IO.Path]::GetFileName($App.DownloadUrl))
-    Write-UiLog "Downloading $($App.Name) from $($App.DownloadUrl)..."
+    $tmp = Join-Path $env:TEMP ("pbt_" + [IO.Path]::GetFileName($App.DownloadUrl))
     Set-UiStatus "Downloading $($App.Name)..."
     try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
-        Invoke-WebRequest -UseBasicParsing -Uri $App.DownloadUrl -OutFile $tmp -ErrorAction Stop
+        Invoke-StreamingDownload -Url $App.DownloadUrl -OutFile $tmp -AppName $App.Name
     } catch {
         Write-UiLog "$($App.Name) download failed: $_" 'ERROR'
         Add-Result $App 'install' 'FAIL' 'download failed'
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
         return
     }
     Write-UiLog "Running $($App.Name) installer silently..."
@@ -369,21 +486,20 @@ function Invoke-DirectInstall { param($App)
 }
 
 # --- zip download + extract + silent install ---
-# For installers that need sibling files (e.g. 3DMark setup.exe expects DLCs
-# in the same directory). Zip layout can be flat or nested; SetupExecutable
-# is found by recursive search inside the extraction dir.
 function Invoke-ZipInstall { param($App)
     if (-not $App.DownloadUrl)     { Write-UiLog "$($App.Name): no DownloadUrl." 'ERROR';     Add-Result $App 'install' 'FAIL' 'no URL';       return }
     if (-not $App.SetupExecutable) { Write-UiLog "$($App.Name): no SetupExecutable." 'ERROR'; Add-Result $App 'install' 'FAIL' 'no setup exe'; return }
 
-    $tmpZip = Join-Path $env:TEMP ("sw_" + [IO.Path]::GetFileName($App.DownloadUrl))
-    $tmpDir = Join-Path $env:TEMP ("sw_extract_" + [Guid]::NewGuid().ToString('N').Substring(0,8))
+    $tmpZip = Join-Path $env:TEMP ("pbt_" + [IO.Path]::GetFileName($App.DownloadUrl))
+    $tmpDir = Join-Path $env:TEMP ("pbt_extract_" + [Guid]::NewGuid().ToString('N').Substring(0,8))
 
     try {
-        Write-UiLog "Downloading $($App.Name) from $($App.DownloadUrl)..."
-        Set-UiStatus "Downloading $($App.Name) (large file)..."
-        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
-        Invoke-WebRequest -UseBasicParsing -Uri $App.DownloadUrl -OutFile $tmpZip -ErrorAction Stop
+        Set-UiStatus "Downloading $($App.Name)..."
+        Invoke-StreamingDownload -Url $App.DownloadUrl -OutFile $tmpZip -AppName $App.Name
+
+        if (-not (Test-IsZipFile $tmpZip)) {
+            throw "Downloaded file is not a valid zip (wrong magic bytes). Check the URL - it may have served an HTML error page."
+        }
 
         Write-UiLog "Extracting $($App.Name)..."
         Set-UiStatus "Extracting $($App.Name)..."
@@ -392,9 +508,7 @@ function Invoke-ZipInstall { param($App)
 
         $setup = Get-ChildItem -Path $tmpDir -Filter $App.SetupExecutable -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $setup) {
-            Write-UiLog "$($App.Name): '$($App.SetupExecutable)' not found in zip." 'ERROR'
-            Add-Result $App 'install' 'FAIL' 'setup not found'
-            return
+            throw "'$($App.SetupExecutable)' not found in zip."
         }
 
         Write-UiLog "Running $($setup.Name) silently..."
@@ -517,7 +631,7 @@ function New-BenchReport {
         [void]$sb.AppendLine("Full log: $($sync.LogPath)")
 
         $desk = [Environment]::GetFolderPath('Desktop')
-        $fn   = "SoftwareReport_{0}_{1}.txt" -f $env:COMPUTERNAME, (Get-Date -Format 'yyyyMMdd_HHmm')
+        $fn   = "PCBT_Report_{0}_{1}.txt" -f $env:COMPUTERNAME, (Get-Date -Format 'yyyyMMdd_HHmm')
         $path = Join-Path $desk $fn
         Set-Content -Path $path -Value $sb.ToString() -Encoding UTF8
         Write-UiLog "Bench report saved: $path" 'OK'
@@ -671,7 +785,7 @@ $controls.BtnUninstall.Add_Click({
 })
 
 # --- Startup ----------------------------------------------------------------
-Write-Log "Software $SCRIPT_VERSION ready. Log: $($sync.LogPath)"
+Write-Log "PC Build Toolkit $SCRIPT_VERSION ready. Log: $($sync.LogPath)"
 Invoke-SelfUpdateCheck
 
 $window.ShowDialog() | Out-Null
