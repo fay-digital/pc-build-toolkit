@@ -125,16 +125,16 @@ Releases hold the 3DMark bundle as an attached asset. The script's catalog refer
 
 ## Versioning
 
-Standard [semver](https://semver.org). Patch for fixes, minor for new features, major for breaking changes. See the [Releases](https://github.com/fay-digital/pc-test-suite/releases) page for per-version changelogs.
+Standard [semver](https://semver.org). Patch for fixes, minor for new features, major for breaking changes. See the [Releases](https://github.com/fay-digital/pc-build-toolkit/releases) page for per-version changelogs.
 
 Pin a specific version by swapping `main` in the one-liner for a release tag:
 
 ```powershell
 # always latest
-irm https://raw.githubusercontent.com/fay-digital/pc-test-suite/main/deployer.ps1 | iex
+irm https://raw.githubusercontent.com/fay-digital/pc-build-toolkit/main/deployer.ps1 | iex
 
 # frozen at v1.0.0
-irm https://raw.githubusercontent.com/fay-digital/pc-test-suite/v1.0.0/deployer.ps1 | iex
+irm https://raw.githubusercontent.com/fay-digital/pc-build-toolkit/v1.0.0/deployer.ps1 | iex
 ```
 
 ---
