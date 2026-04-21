@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 # =============================================================================
-#  PC BUILD TOOLKIT (v1.0.1)
+#  PC BUILD TOOLKIT (v1.0.2)
 #  - Self-elevating PowerShell + WPF
 #  - Multi-source installers (winget / choco / direct / zip)
 #  - Streaming download with live progress + content validation
@@ -9,7 +9,7 @@
 #  Launch from web: irm https://fay.digital/pbt | iex
 # =============================================================================
 
-$SCRIPT_VERSION = 'v1.0.1'
+$SCRIPT_VERSION = 'v1.0.2'
 $SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/fay-digital/pc-build-toolkit/main/deployer.ps1'
 
 # --- Self-elevate if not admin -----------------------------------------------
@@ -113,6 +113,9 @@ $script:DefaultChecked = @(
                     <Separator Margin="0,14,0,10" Background="#2A2F38"/>
                     <TextBlock Text="REPORT" Foreground="#7F8793" FontSize="11" FontWeight="Bold" Margin="0,0,0,6"/>
                     <CheckBox Name="OptBenchReport" Content="Generate bench report on Desktop after run" IsChecked="True"/>
+                    <Separator Margin="0,14,0,10" Background="#2A2F38"/>
+                    <TextBlock Text="DEBUG" Foreground="#7F8793" FontSize="11" FontWeight="Bold" Margin="0,0,0,6"/>
+                    <CheckBox Name="OptKeepTemp" Content="Keep downloaded/extracted files for debugging"/>
                 </StackPanel>
             </Border>
         </Grid>
@@ -158,7 +161,7 @@ $controls = @{}
 foreach ($n in 'AppPanel','LogOutput','LogScroll','BtnRun','BtnQuit','BtnUninstall','BtnSelectAllApps',
                'StatusText','ProgressBar','ProgressPct','VersionLabel',
                'TweakPowerNever','TweakDisableHibernate','TweakClearDownloads',
-               'TweakEmptyRecycle','TweakClearBrowser','OptBenchReport') {
+               'TweakEmptyRecycle','TweakClearBrowser','OptBenchReport','OptKeepTemp') {
     $controls[$n] = $window.FindName($n)
 }
 $controls.VersionLabel.Text = $SCRIPT_VERSION
@@ -179,6 +182,7 @@ $sync.Mode           = $null
 $sync.SelectedApps   = @()
 $sync.SelectedTweaks = @{}
 $sync.GenerateReport = $true
+$sync.KeepTemp       = $false
 $sync.RunResults     = @()
 
 # --- UI logging helper (main thread) -----------------------------------------
@@ -265,8 +269,6 @@ function Write-UiLog {
         $sync.LogScroll.ScrollToBottom()
     })
 }
-# In-place log update (replaces the last line instead of appending).
-# Used for download progress so the log doesn't flood with 1000s of lines.
 function Write-UiLogReplace {
     param([string]$Message)
     $stamp = Get-Date -Format 'HH:mm:ss'
@@ -300,9 +302,6 @@ function Add-Result { param($App, $Action, $Status, $Detail='')
 }
 
 # --- Streaming download with progress ---------------------------------------
-# Uses HttpClient for streaming (Invoke-WebRequest buffers the whole response
-# into memory, which is useless for a 1.4 GB file and gives no progress).
-# Validates Content-Type and expected size before returning success.
 function Invoke-StreamingDownload {
     param(
         [Parameter(Mandatory)][string]$Url,
@@ -320,12 +319,7 @@ function Invoke-StreamingDownload {
 
     try {
         $response = $client.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
-
-        if (-not $response.IsSuccessStatusCode) {
-            throw "HTTP $([int]$response.StatusCode) $($response.ReasonPhrase)"
-        }
-
-        # Reject obvious non-binary responses (HTML error pages, JSON, etc.)
+        if (-not $response.IsSuccessStatusCode) { throw "HTTP $([int]$response.StatusCode) $($response.ReasonPhrase)" }
         $ct = $response.Content.Headers.ContentType
         if ($ct) {
             $mt = $ct.MediaType
@@ -333,15 +327,10 @@ function Invoke-StreamingDownload {
                 throw "Server returned $mt (likely an error page, not a file). Check the URL."
             }
         }
-
         $totalBytes = $response.Content.Headers.ContentLength
         $totalMB    = if ($totalBytes) { [Math]::Round($totalBytes / 1MB, 1) } else { $null }
-
-        if ($totalBytes) {
-            Write-UiLog "Downloading $AppName ($totalMB MB)..."
-        } else {
-            Write-UiLog "Downloading $AppName (size unknown)..."
-        }
+        if ($totalBytes) { Write-UiLog "Downloading $AppName ($totalMB MB)..." }
+        else             { Write-UiLog "Downloading $AppName (size unknown)..." }
 
         $sourceStream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
         $destStream   = [System.IO.File]::Create($OutFile)
@@ -357,13 +346,11 @@ function Invoke-StreamingDownload {
                 if ($read -le 0) { break }
                 $destStream.Write($buffer, 0, $read)
                 $totalRead += $read
-
                 $now = [DateTime]::UtcNow
                 if (($now - $lastReport).TotalMilliseconds -ge 1000) {
                     $elapsed = ($now - $startTime).TotalSeconds
                     $speedMB = if ($elapsed -gt 0) { [Math]::Round(($totalRead / 1MB) / $elapsed, 1) } else { 0 }
                     $doneMB  = [Math]::Round($totalRead / 1MB, 1)
-
                     if ($totalBytes) {
                         $pct = ($totalRead / $totalBytes) * 100
                         $msg = "Downloading ${AppName}: $doneMB / $totalMB MB ({0:N1}%) - $speedMB MB/s" -f $pct
@@ -371,7 +358,6 @@ function Invoke-StreamingDownload {
                     } else {
                         $msg = "Downloading ${AppName}: $doneMB MB - $speedMB MB/s"
                     }
-
                     if ($firstLine) { Write-UiLog $msg; $firstLine = $false }
                     else            { Write-UiLogReplace $msg }
                     $lastReport = $now
@@ -383,11 +369,9 @@ function Invoke-StreamingDownload {
             $destStream.Close()
             $sourceStream.Close()
         }
-
         if ($totalBytes -and $totalRead -ne $totalBytes) {
             throw "Download truncated: got $totalRead bytes, expected $totalBytes."
         }
-
         $finalMB = [Math]::Round($totalRead / 1MB, 1)
         Write-UiLog "Download complete: $finalMB MB." 'OK'
     }
@@ -397,7 +381,6 @@ function Invoke-StreamingDownload {
     }
 }
 
-# Verify the first 4 bytes look like a zip ('PK\x03\x04').
 function Test-IsZipFile {
     param([string]$Path)
     if (-not (Test-Path $Path)) { return $false }
@@ -408,6 +391,41 @@ function Test-IsZipFile {
         $fs.Close()
         return ($n -eq 4 -and $hdr[0] -eq 0x50 -and $hdr[1] -eq 0x4B -and $hdr[2] -eq 0x03 -and $hdr[3] -eq 0x04)
     } catch { return $false }
+}
+
+# --- Installer launcher -----------------------------------------------------
+# Runs a setup exe silently FROM ITS OWN DIRECTORY. Some installers (3DMark
+# in particular) resolve sibling resources relative to CWD, not relative to
+# their own path, so inheriting PowerShell's CWD breaks them.
+# Also captures stderr/stdout so failures leave something to debug from.
+function Start-SilentInstaller {
+    param(
+        [Parameter(Mandatory)][string]$ExePath,
+        [Parameter(Mandatory)][string]$Arguments,
+        [Parameter(Mandatory)][string]$AppName
+    )
+    $workDir  = Split-Path -Parent $ExePath
+    $stdoutFile = Join-Path $env:TEMP ("pbt_stdout_" + [Guid]::NewGuid().ToString('N').Substring(0,8) + ".log")
+    $stderrFile = Join-Path $env:TEMP ("pbt_stderr_" + [Guid]::NewGuid().ToString('N').Substring(0,8) + ".log")
+
+    Write-UiLog "Running $([IO.Path]::GetFileName($ExePath)) in '$workDir' with args '$Arguments'..."
+    $p = Start-Process -FilePath $ExePath -ArgumentList $Arguments `
+        -WorkingDirectory $workDir `
+        -RedirectStandardOutput $stdoutFile `
+        -RedirectStandardError  $stderrFile `
+        -Wait -PassThru -NoNewWindow
+
+    $stdout = if (Test-Path $stdoutFile) { Get-Content $stdoutFile -Raw -ErrorAction SilentlyContinue } else { $null }
+    $stderr = if (Test-Path $stderrFile) { Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue } else { $null }
+    Remove-Item $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
+
+    if ($stdout -and $stdout.Trim()) {
+        Write-UiLog "$AppName stdout: $($stdout.Trim() -replace "`r?`n", ' | ')" 'INFO'
+    }
+    if ($stderr -and $stderr.Trim()) {
+        Write-UiLog "$AppName stderr: $($stderr.Trim() -replace "`r?`n", ' | ')" 'WARN'
+    }
+    return $p.ExitCode
 }
 
 function Test-ChocoInstalled { [bool](Get-Command choco.exe -ErrorAction SilentlyContinue) }
@@ -423,7 +441,6 @@ function Install-Chocolatey {
     Write-UiLog "Chocolatey installed." 'OK'
 }
 
-# --- winget ---
 function Invoke-WingetInstall { param($App)
     Write-UiLog "Installing $($App.Name) via winget ($($App.Id))..."
     $p = Start-Process winget -ArgumentList @('install','--id',$App.Id,'--silent',
@@ -447,7 +464,6 @@ function Invoke-WingetUninstall { param($App)
     }
 }
 
-# --- choco ---
 function Invoke-ChocoInstall { param($App)
     if (-not (Test-ChocoInstalled)) { Install-Chocolatey }
     Write-UiLog "Installing $($App.Name) via Chocolatey..."
@@ -463,7 +479,6 @@ function Invoke-ChocoUninstall { param($App)
     else { Write-UiLog "$($App.Name) exit $($p.ExitCode) (may be absent)." 'INFO'; Add-Result $App 'uninstall' 'SKIP' "exit $($p.ExitCode)" }
 }
 
-# --- direct download + silent install ---
 function Invoke-DirectInstall { param($App)
     if (-not $App.DownloadUrl) { Write-UiLog "$($App.Name): no DownloadUrl." 'ERROR'; Add-Result $App 'install' 'FAIL' 'no URL'; return }
     $tmp = Join-Path $env:TEMP ("pbt_" + [IO.Path]::GetFileName($App.DownloadUrl))
@@ -473,19 +488,18 @@ function Invoke-DirectInstall { param($App)
     } catch {
         Write-UiLog "$($App.Name) download failed: $_" 'ERROR'
         Add-Result $App 'install' 'FAIL' 'download failed'
-        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        if (-not $sync.KeepTemp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
         return
     }
-    Write-UiLog "Running $($App.Name) installer silently..."
     Set-UiStatus "Installing $($App.Name)..."
     $silent = if ($App.SilentArgs) { $App.SilentArgs } else { '/S' }
-    $p = Start-Process $tmp -ArgumentList $silent -Wait -PassThru -NoNewWindow
-    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-    if ($p.ExitCode -eq 0) { Write-UiLog "$($App.Name) installed." 'OK'; Add-Result $App 'install' 'OK' }
-    else { Write-UiLog "$($App.Name) installer exit $($p.ExitCode)." 'WARN'; Add-Result $App 'install' 'WARN' "exit $($p.ExitCode)" }
+    $exit = Start-SilentInstaller -ExePath $tmp -Arguments $silent -AppName $App.Name
+    if (-not $sync.KeepTemp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
+    else { Write-UiLog "Kept installer: $tmp" 'INFO' }
+    if ($exit -eq 0) { Write-UiLog "$($App.Name) installed." 'OK'; Add-Result $App 'install' 'OK' }
+    else { Write-UiLog "$($App.Name) installer exit $exit (0x$('{0:X8}' -f $exit))." 'WARN'; Add-Result $App 'install' 'WARN' "exit $exit" }
 }
 
-# --- zip download + extract + silent install ---
 function Invoke-ZipInstall { param($App)
     if (-not $App.DownloadUrl)     { Write-UiLog "$($App.Name): no DownloadUrl." 'ERROR';     Add-Result $App 'install' 'FAIL' 'no URL';       return }
     if (-not $App.SetupExecutable) { Write-UiLog "$($App.Name): no SetupExecutable." 'ERROR'; Add-Result $App 'install' 'FAIL' 'no setup exe'; return }
@@ -498,37 +512,46 @@ function Invoke-ZipInstall { param($App)
         Invoke-StreamingDownload -Url $App.DownloadUrl -OutFile $tmpZip -AppName $App.Name
 
         if (-not (Test-IsZipFile $tmpZip)) {
-            throw "Downloaded file is not a valid zip (wrong magic bytes). Check the URL - it may have served an HTML error page."
+            throw "Downloaded file is not a valid zip (wrong magic bytes)."
         }
 
-        Write-UiLog "Extracting $($App.Name)..."
+        Write-UiLog "Extracting $($App.Name) to $tmpDir ..."
         Set-UiStatus "Extracting $($App.Name)..."
         New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
         Expand-Archive -Path $tmpZip -DestinationPath $tmpDir -Force -ErrorAction Stop
 
+        # Locate setup.exe wherever it landed inside the zip
         $setup = Get-ChildItem -Path $tmpDir -Filter $App.SetupExecutable -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $setup) {
-            throw "'$($App.SetupExecutable)' not found in zip."
+            throw "'$($App.SetupExecutable)' not found in extracted content at $tmpDir"
         }
 
-        Write-UiLog "Running $($setup.Name) silently..."
         Set-UiStatus "Installing $($App.Name)..."
         $silent = if ($App.SilentArgs) { $App.SilentArgs } else { '/S' }
-        $p = Start-Process $setup.FullName -ArgumentList $silent -Wait -PassThru -NoNewWindow
-        if ($p.ExitCode -eq 0) { Write-UiLog "$($App.Name) installed." 'OK'; Add-Result $App 'install' 'OK' }
-        else { Write-UiLog "$($App.Name) installer exit $($p.ExitCode)." 'WARN'; Add-Result $App 'install' 'WARN' "exit $($p.ExitCode)" }
+        $exit = Start-SilentInstaller -ExePath $setup.FullName -Arguments $silent -AppName $App.Name
+
+        if ($exit -eq 0) { Write-UiLog "$($App.Name) installed." 'OK'; Add-Result $App 'install' 'OK' }
+        else {
+            $hex = '0x{0:X8}' -f $exit
+            Write-UiLog "$($App.Name) installer exit $exit ($hex). Setup ran from '$($setup.DirectoryName)'." 'WARN'
+            Add-Result $App 'install' 'WARN' "exit $exit ($hex)"
+        }
     }
     catch {
         Write-UiLog "$($App.Name) install error: $_" 'ERROR'
         Add-Result $App 'install' 'FAIL' $_.Exception.Message
     }
     finally {
-        Remove-Item $tmpZip -Force -ErrorAction SilentlyContinue
-        Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+        if ($sync.KeepTemp) {
+            Write-UiLog "Kept zip:     $tmpZip" 'INFO'
+            Write-UiLog "Kept extract: $tmpDir" 'INFO'
+        } else {
+            Remove-Item $tmpZip -Force -ErrorAction SilentlyContinue
+            Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
-# --- Registry-based uninstall (for 'direct' and 'zip' sources) ---
 function Invoke-RegistryUninstall { param($App)
     $match = $App.UninstallRegistryMatch
     if (-not $match) { Write-UiLog "$($App.Name): no UninstallRegistryMatch." 'WARN'; return }
@@ -555,7 +578,6 @@ function Invoke-RegistryUninstall { param($App)
     if (-not $found) { Write-UiLog "$($App.Name) not found in registry, skipped." 'INFO'; Add-Result $App 'uninstall' 'SKIP' 'not present' }
 }
 
-# --- Tweaks ---
 function Invoke-TweakPowerNever {
     Write-UiLog "Setting power timeouts to never..."
     powercfg -change -monitor-timeout-ac 0
@@ -602,7 +624,6 @@ function Invoke-TweakClearBrowser {
     }
 }
 
-# --- Bench report ---
 function New-BenchReport {
     try {
         $cpu  = (Get-CimInstance Win32_Processor | Select-Object -First 1).Name
@@ -638,7 +659,6 @@ function New-BenchReport {
     } catch { Write-UiLog "Report generation failed: $_" 'WARN' }
 }
 
-# --- Main pipeline ---
 try {
     Set-UiBusy $true
     Set-UiProgress 0
@@ -647,6 +667,7 @@ try {
     $tweaks = $sync.SelectedTweaks
     $mode   = $sync.Mode
     Write-UiLog "Pipeline dispatching ($mode, $($apps.Count) apps)..."
+    if ($sync.KeepTemp) { Write-UiLog "Debug mode: temp files will be kept." 'INFO' }
 
     if ($mode -eq 'Install') {
         Write-UiLog "=============== INSTALL RUN STARTED ==============="
@@ -721,12 +742,13 @@ finally { Set-UiBusy $false }
 
 # --- Runspace launcher -------------------------------------------------------
 function Start-Pipeline {
-    param([string]$Mode, [array]$SelectedApps, [hashtable]$SelectedTweaks, [bool]$GenerateReport)
+    param([string]$Mode, [array]$SelectedApps, [hashtable]$SelectedTweaks, [bool]$GenerateReport, [bool]$KeepTemp)
 
     $sync.Mode           = $Mode
     $sync.SelectedApps   = $SelectedApps
     $sync.SelectedTweaks = $SelectedTweaks
     $sync.GenerateReport = $GenerateReport
+    $sync.KeepTemp       = $KeepTemp
 
     Write-Log "Starting $Mode pipeline..."
 
@@ -742,7 +764,6 @@ function Start-Pipeline {
     $null = $ps.BeginInvoke()
 }
 
-# --- Wire up buttons ---------------------------------------------------------
 $controls.BtnQuit.Add_Click({ $window.Close() })
 
 $controls.BtnSelectAllApps.Add_Click({
@@ -772,7 +793,8 @@ $controls.BtnRun.Add_Click({
         return
     }
     Start-Pipeline -Mode 'Install' -SelectedApps $selectedApps -SelectedTweaks $selectedTweaks `
-                   -GenerateReport ([bool]$controls.OptBenchReport.IsChecked)
+                   -GenerateReport ([bool]$controls.OptBenchReport.IsChecked) `
+                   -KeepTemp       ([bool]$controls.OptKeepTemp.IsChecked)
 })
 
 $controls.BtnUninstall.Add_Click({
@@ -781,10 +803,10 @@ $controls.BtnUninstall.Add_Click({
         'Confirm uninstall', 'YesNo', 'Warning')
     if ($r -ne [System.Windows.MessageBoxResult]::Yes) { return }
     Start-Pipeline -Mode 'Uninstall' -SelectedApps $script:AppCatalog -SelectedTweaks @{} `
-                   -GenerateReport ([bool]$controls.OptBenchReport.IsChecked)
+                   -GenerateReport ([bool]$controls.OptBenchReport.IsChecked) `
+                   -KeepTemp       ([bool]$controls.OptKeepTemp.IsChecked)
 })
 
-# --- Startup ----------------------------------------------------------------
 Write-Log "PC Build Toolkit $SCRIPT_VERSION ready. Log: $($sync.LogPath)"
 Invoke-SelfUpdateCheck
 
