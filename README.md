@@ -11,7 +11,7 @@ Built for Fay Digital's PC building workflow. Public so it can be run from any b
 From an **elevated PowerShell** prompt on the target machine:
 
 ```powershell
-irm https://raw.githubusercontent.com/fay-digital/pc-test-suite/main/deployer.ps1 | iex
+irm fay.digital/pbt | iex
 ```
 
 The script will self-elevate if you forget — a UAC prompt appears, approve it, and the UI launches.
