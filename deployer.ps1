@@ -38,7 +38,7 @@ $script:AppCatalog = @(
     @{ Id='CrystalDewWorld.CrystalDiskMark'; Name='CrystalDiskMark'; Category='Benchmark';   Source='winget' }
     @{ Id='Maxon.CinebenchR23';              Name='Cinebench R23';   Category='Benchmark';   Source='winget' }
     @{ Id='3dmark-bundled';                  Name='3DMark (Steel Nomad)'; Category='Benchmark'; Source='zip'
-       DownloadUrl='https://github.com/fay-digital/pc-test-suite/releases/download/v1.0.0/3dmark-bundle.zip'
+       DownloadUrl='https://github.com/fay-digital/pc-build-toolkit/releases/tag/v1.0.0'
        SetupExecutable='3dmark-setup.exe'
        SilentArgs='/S'
        UninstallRegistryMatch='3DMark' }
