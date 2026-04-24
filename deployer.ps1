@@ -1,15 +1,15 @@
 #Requires -Version 5.1
 # =============================================================================
-#  PC BUILD TOOLKIT (v1.0.2)
+#  PC BUILD TOOLKIT (v1.0.3)
 #  - Self-elevating PowerShell + WPF
 #  - Multi-source installers (winget / choco / direct / zip)
-#  - Streaming download with live progress + content validation
+#  - Streaming download + tar.exe extraction (handles Deflate64/LZMA zips)
 #
 #  Launch locally:  powershell -ExecutionPolicy Bypass -File .\deployer.ps1
 #  Launch from web: irm https://fay.digital/pbt | iex
 # =============================================================================
 
-$SCRIPT_VERSION = 'v1.0.2'
+$SCRIPT_VERSION = 'v1.0.3'
 $SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/fay-digital/pc-build-toolkit/main/deployer.ps1'
 
 # --- Self-elevate if not admin -----------------------------------------------
@@ -185,7 +185,6 @@ $sync.GenerateReport = $true
 $sync.KeepTemp       = $false
 $sync.RunResults     = @()
 
-# --- UI logging helper (main thread) -----------------------------------------
 function Write-Log {
     param([string]$Message, [string]$Level = 'INFO')
     $stamp = Get-Date -Format 'HH:mm:ss'
@@ -197,7 +196,6 @@ function Write-Log {
     })
 }
 
-# --- Build app checkboxes ----------------------------------------------------
 $appCheckboxes = @{}
 foreach ($app in $script:AppCatalog) {
     $cb = New-Object System.Windows.Controls.CheckBox
@@ -207,7 +205,6 @@ foreach ($app in $script:AppCatalog) {
     $appCheckboxes[$app.Id] = $cb
 }
 
-# --- Pre-flight checks -------------------------------------------------------
 function Invoke-PreflightChecks {
     param([int]$MinFreeGB = 10)
     Write-Log "Running pre-flight checks..."
@@ -240,7 +237,6 @@ function Invoke-PreflightChecks {
     return $true
 }
 
-# --- Self-update check -------------------------------------------------------
 function Invoke-SelfUpdateCheck {
     if (-not $PSCommandPath -or -not (Test-Path $PSCommandPath)) {
         Write-Log "Loaded from web stream; skipping self-update check."; return
@@ -257,7 +253,6 @@ function Invoke-SelfUpdateCheck {
     } catch { Write-Log "Self-update check skipped: $_" 'WARN' }
 }
 
-# --- Pipeline body (here-string; re-parsed fresh in the runspace) ------------
 $pipelineCode = @'
 function Write-UiLog {
     param([string]$Message, [string]$Level = 'INFO')
@@ -301,7 +296,6 @@ function Add-Result { param($App, $Action, $Status, $Detail='')
     $sync.RunResults += [pscustomobject]@{ App=$App.Name; Action=$Action; Status=$Status; Detail=$Detail }
 }
 
-# --- Streaming download with progress ---------------------------------------
 function Invoke-StreamingDownload {
     param(
         [Parameter(Mandatory)][string]$Url,
@@ -393,11 +387,40 @@ function Test-IsZipFile {
     } catch { return $false }
 }
 
-# --- Installer launcher -----------------------------------------------------
-# Runs a setup exe silently FROM ITS OWN DIRECTORY. Some installers (3DMark
-# in particular) resolve sibling resources relative to CWD, not relative to
-# their own path, so inheriting PowerShell's CWD breaks them.
-# Also captures stderr/stdout so failures leave something to debug from.
+# Extract a zip. Tries tar.exe (ships with Win10 1803+, handles Deflate64,
+# LZMA, ZIP64, etc) first; falls back to Expand-Archive only if tar is absent.
+function Expand-ZipArchive {
+    param(
+        [Parameter(Mandatory)][string]$ZipPath,
+        [Parameter(Mandatory)][string]$DestinationPath
+    )
+    New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+
+    $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
+    if ($tar) {
+        Write-UiLog "Extracting with tar.exe..."
+        $stderrFile = Join-Path $env:TEMP ("pbt_tar_err_" + [Guid]::NewGuid().ToString('N').Substring(0,8) + ".log")
+        $p = Start-Process -FilePath $tar.Source `
+            -ArgumentList @('-xf', "`"$ZipPath`"", '-C', "`"$DestinationPath`"") `
+            -Wait -PassThru -NoNewWindow `
+            -RedirectStandardError $stderrFile
+        $err = if (Test-Path $stderrFile) { Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue } else { $null }
+        Remove-Item $stderrFile -Force -ErrorAction SilentlyContinue
+        if ($p.ExitCode -eq 0) {
+            Write-UiLog "Extraction OK (tar.exe)." 'OK'
+            return
+        }
+        Write-UiLog "tar.exe failed (exit $($p.ExitCode)). $($err -replace '\s+', ' ')" 'WARN'
+        Write-UiLog "Falling back to Expand-Archive..."
+    } else {
+        Write-UiLog "tar.exe not found. Using Expand-Archive..."
+    }
+
+    # Fallback - works for standard Deflate zips only
+    Expand-Archive -Path $ZipPath -DestinationPath $DestinationPath -Force -ErrorAction Stop
+    Write-UiLog "Extraction OK (Expand-Archive)." 'OK'
+}
+
 function Start-SilentInstaller {
     param(
         [Parameter(Mandatory)][string]$ExePath,
@@ -419,12 +442,8 @@ function Start-SilentInstaller {
     $stderr = if (Test-Path $stderrFile) { Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue } else { $null }
     Remove-Item $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
 
-    if ($stdout -and $stdout.Trim()) {
-        Write-UiLog "$AppName stdout: $($stdout.Trim() -replace "`r?`n", ' | ')" 'INFO'
-    }
-    if ($stderr -and $stderr.Trim()) {
-        Write-UiLog "$AppName stderr: $($stderr.Trim() -replace "`r?`n", ' | ')" 'WARN'
-    }
+    if ($stdout -and $stdout.Trim()) { Write-UiLog "$AppName stdout: $($stdout.Trim() -replace "`r?`n", ' | ')" 'INFO' }
+    if ($stderr -and $stderr.Trim()) { Write-UiLog "$AppName stderr: $($stderr.Trim() -replace "`r?`n", ' | ')" 'WARN' }
     return $p.ExitCode
 }
 
@@ -515,12 +534,10 @@ function Invoke-ZipInstall { param($App)
             throw "Downloaded file is not a valid zip (wrong magic bytes)."
         }
 
-        Write-UiLog "Extracting $($App.Name) to $tmpDir ..."
         Set-UiStatus "Extracting $($App.Name)..."
-        New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
-        Expand-Archive -Path $tmpZip -DestinationPath $tmpDir -Force -ErrorAction Stop
+        Write-UiLog "Extracting $($App.Name) to $tmpDir ..."
+        Expand-ZipArchive -ZipPath $tmpZip -DestinationPath $tmpDir
 
-        # Locate setup.exe wherever it landed inside the zip
         $setup = Get-ChildItem -Path $tmpDir -Filter $App.SetupExecutable -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $setup) {
             throw "'$($App.SetupExecutable)' not found in extracted content at $tmpDir"
@@ -740,24 +757,19 @@ catch { Write-UiLog "Pipeline fatal: $_" 'ERROR' }
 finally { Set-UiBusy $false }
 '@
 
-# --- Runspace launcher -------------------------------------------------------
 function Start-Pipeline {
     param([string]$Mode, [array]$SelectedApps, [hashtable]$SelectedTweaks, [bool]$GenerateReport, [bool]$KeepTemp)
-
     $sync.Mode           = $Mode
     $sync.SelectedApps   = $SelectedApps
     $sync.SelectedTweaks = $SelectedTweaks
     $sync.GenerateReport = $GenerateReport
     $sync.KeepTemp       = $KeepTemp
-
     Write-Log "Starting $Mode pipeline..."
-
     $rs = [RunspaceFactory]::CreateRunspace()
     $rs.ApartmentState = 'STA'
     $rs.ThreadOptions  = 'ReuseThread'
     $rs.Open()
     $rs.SessionStateProxy.SetVariable('sync', $sync)
-
     $ps = [PowerShell]::Create()
     $ps.Runspace = $rs
     $null = $ps.AddScript($pipelineCode)
@@ -765,13 +777,11 @@ function Start-Pipeline {
 }
 
 $controls.BtnQuit.Add_Click({ $window.Close() })
-
 $controls.BtnSelectAllApps.Add_Click({
     $anyUnchecked = $appCheckboxes.Values | Where-Object { -not $_.IsChecked }
     $newState = [bool]$anyUnchecked
     $appCheckboxes.Values | ForEach-Object { $_.IsChecked = $newState }
 })
-
 $controls.BtnRun.Add_Click({
     $selectedApps = @()
     foreach ($app in $script:AppCatalog) {
@@ -796,7 +806,6 @@ $controls.BtnRun.Add_Click({
                    -GenerateReport ([bool]$controls.OptBenchReport.IsChecked) `
                    -KeepTemp       ([bool]$controls.OptKeepTemp.IsChecked)
 })
-
 $controls.BtnUninstall.Add_Click({
     $r = [System.Windows.MessageBox]::Show(
         "Uninstall every app in the catalog that is currently installed?`n`nApps not present will be skipped.",
