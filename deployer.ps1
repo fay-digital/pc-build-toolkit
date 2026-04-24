@@ -4,7 +4,6 @@
 #  - Self-elevating PowerShell + WPF
 #  - Multi-source installers (winget / choco / direct / zip)
 #  - Bloat removal, GPU driver auto-detect, Windows Update, Start menu grid
-#  - Extraction: tar.exe -> 7-Zip standalone -> Expand-Archive fallback chain
 #
 #  Launch locally:  powershell -ExecutionPolicy Bypass -File .\deployer.ps1
 #  Launch from web: irm https://fay.digital/pbt | iex
@@ -12,14 +11,6 @@
 
 $SCRIPT_VERSION = 'v1.1.0'
 $SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/fay-digital/pc-build-toolkit/main/deployer.ps1'
-
-# Standalone 7-Zip console binary (7zr.exe handles .7z; 7za.exe handles .zip
-# including Deflate64). ~1 MB, no install required.
-$SCRIPT_7ZA_URL = 'https://www.7-zip.org/a/7z2409-extra.7z'
-# 7z2409-extra.7z is itself a .7z archive containing 7za.exe. We need a raw
-# 7za.exe to bootstrap. Use NuGet's hosted copy which is the standard
-# "get 7za.exe with just HTTP" path (same binary, stable URL, no install).
-$SCRIPT_7ZA_DIRECT = 'https://raw.githubusercontent.com/mcmilk/7-Zip/main/CPP/7zip/Bundles/Alone/7za.exe'
 
 # --- Self-elevate if not admin -----------------------------------------------
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
@@ -57,6 +48,7 @@ $script:DefaultChecked = @(
 )
 
 # --- Bloat list (AppX, current user) ----------------------------------------
+# These PackageFamilyName patterns match what's actually installed.
 $script:BloatList = @(
     @{ Name='Camera';              Match='Microsoft.WindowsCamera' }
     @{ Name='Clipchamp';           Match='Clipchamp.Clipchamp' }
@@ -205,6 +197,7 @@ foreach ($n in 'AppPanel','LogOutput','LogScroll','BtnRun','BtnQuit','BtnUninsta
 }
 $controls.VersionLabel.Text = $SCRIPT_VERSION
 
+# --- Synchronized state -----------------------------------------------------
 $sync = [hashtable]::Synchronized(@{})
 $sync.Window         = $window
 $sync.Log            = $controls.LogOutput
@@ -217,7 +210,6 @@ $sync.BtnUninst      = $controls.BtnUninstall
 $sync.LogPath        = Join-Path $env:TEMP 'pcbt.log'
 $sync.AppCatalog     = $script:AppCatalog
 $sync.BloatList      = $script:BloatList
-$sync.SevenZipUrl    = $SCRIPT_7ZA_DIRECT
 $sync.Mode           = $null
 $sync.SelectedApps   = @()
 $sync.SelectedTweaks = @{}
@@ -401,59 +393,9 @@ function Test-IsZipFile {
     } catch { return $false }
 }
 
-# Fetch a standalone 7za.exe (~1 MB). Tries multiple known-stable sources
-# because 7-zip.org doesn't publish a raw .exe, only .msi/.7z self-extractors.
-# Returns path to 7za.exe on success, $null on total failure.
-function Get-StandaloneSevenZip {
-    # If the system already has 7z.exe installed, use it.
-    $existing = Get-Command 7z.exe -ErrorAction SilentlyContinue
-    if ($existing) { Write-UiLog "Using existing 7z.exe at $($existing.Source)." ; return $existing.Source }
-
-    # Cache per-session so repeated zip installs don't re-download.
-    if ($sync.SevenZipPath -and (Test-Path $sync.SevenZipPath)) { return $sync.SevenZipPath }
-
-    $dest = Join-Path $env:TEMP 'pbt_7za.exe'
-    $sources = @(
-        # Chocolatey's CDN hosts a raw 7za.exe - stable and widely mirrored.
-        'https://chocolatey.org/7za.exe',
-        # GitHub mirror of 7-Zip source tree - has a compiled 7za.exe under bin/
-        'https://github.com/mcmilk/7zip-zstd/releases/download/24.08-v1.5.6-R3/7z2408-extra.7z'
-    )
-    foreach ($url in $sources) {
-        try {
-            Write-UiLog "Fetching 7-Zip standalone from $url..."
-            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
-            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $dest -TimeoutSec 60 -ErrorAction Stop
-            # Sanity check: is it an EXE? (MZ header)
-            $fs = [System.IO.File]::OpenRead($dest)
-            $hdr = New-Object byte[] 2
-            [void]$fs.Read($hdr, 0, 2)
-            $fs.Close()
-            if ($hdr[0] -eq 0x4D -and $hdr[1] -eq 0x5A) {
-                Write-UiLog "7-Zip standalone ready at $dest." 'OK'
-                $sync.SevenZipPath = $dest
-                return $dest
-            } else {
-                Write-UiLog "Downloaded file not a PE executable; trying next source..." 'WARN'
-                Remove-Item $dest -Force -ErrorAction SilentlyContinue
-            }
-        } catch {
-            Write-UiLog "7-Zip fetch from $url failed: $_" 'WARN'
-            Remove-Item $dest -Force -ErrorAction SilentlyContinue
-        }
-    }
-    Write-UiLog "Could not obtain 7-Zip standalone from any source." 'ERROR'
-    return $null
-}
-
-# Extraction chain: tar.exe first (ships with Windows, fast, no download),
-# then 7-Zip (handles Deflate64/LZMA - downloaded on demand), then
-# Expand-Archive (last resort, Deflate only).
 function Expand-ZipArchive {
     param([Parameter(Mandatory)][string]$ZipPath, [Parameter(Mandatory)][string]$DestinationPath)
     New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
-
-    # --- Try tar.exe ---
     $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
     if ($tar) {
         Write-UiLog "Extracting with tar.exe..."
@@ -463,34 +405,9 @@ function Expand-ZipArchive {
         $err = if (Test-Path $stderrFile) { Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue } else { $null }
         Remove-Item $stderrFile -Force -ErrorAction SilentlyContinue
         if ($p.ExitCode -eq 0) { Write-UiLog "Extraction OK (tar.exe)." 'OK'; return }
-
-        $errOneLine = $err -replace '\s+', ' '
-        Write-UiLog "tar.exe failed (exit $($p.ExitCode)): $errOneLine" 'WARN'
-
-        # If tar complained about compression method, clear the partial
-        # extraction and fall through to 7-Zip. Otherwise, still try.
-        Get-ChildItem $DestinationPath -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-    }
-
-    # --- Try 7-Zip ---
-    $sevenZip = Get-StandaloneSevenZip
-    if ($sevenZip) {
-        Write-UiLog "Extracting with 7-Zip ($sevenZip)..."
-        $stderrFile = Join-Path $env:TEMP ("pbt_7z_err_" + [Guid]::NewGuid().ToString('N').Substring(0,8) + ".log")
-        $stdoutFile = Join-Path $env:TEMP ("pbt_7z_out_" + [Guid]::NewGuid().ToString('N').Substring(0,8) + ".log")
-        # -y: assume yes to prompts, -bb0: minimal output, -o: output dir (no space after)
-        $p = Start-Process -FilePath $sevenZip -ArgumentList @('x', "-y", "-bb0", "-o`"$DestinationPath`"", "`"$ZipPath`"") `
-            -Wait -PassThru -NoNewWindow -RedirectStandardError $stderrFile -RedirectStandardOutput $stdoutFile
-        $err = if (Test-Path $stderrFile) { Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue } else { $null }
-        $out = if (Test-Path $stdoutFile) { Get-Content $stdoutFile -Raw -ErrorAction SilentlyContinue } else { $null }
-        Remove-Item $stderrFile, $stdoutFile -Force -ErrorAction SilentlyContinue
-        if ($p.ExitCode -eq 0) { Write-UiLog "Extraction OK (7-Zip)." 'OK'; return }
-        Write-UiLog "7-Zip failed (exit $($p.ExitCode)): $($err -replace '\s+', ' ') $($out -replace '\s+', ' ')" 'WARN'
-        Get-ChildItem $DestinationPath -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-    }
-
-    # --- Last resort: Expand-Archive ---
-    Write-UiLog "Falling back to Expand-Archive..."
+        Write-UiLog "tar.exe failed (exit $($p.ExitCode)). $($err -replace '\s+', ' ')" 'WARN'
+        Write-UiLog "Falling back to Expand-Archive..."
+    } else { Write-UiLog "tar.exe not found. Using Expand-Archive..." }
     Expand-Archive -Path $ZipPath -DestinationPath $DestinationPath -Force -ErrorAction Stop
     Write-UiLog "Extraction OK (Expand-Archive)." 'OK'
 }
@@ -512,6 +429,7 @@ function Start-SilentInstaller {
     return $p.ExitCode
 }
 
+# --- winget / choco / installer plumbing (unchanged) -----------------------
 function Test-ChocoInstalled { [bool](Get-Command choco.exe -ErrorAction SilentlyContinue) }
 function Install-Chocolatey {
     Write-UiLog "Chocolatey not found. Installing..."
@@ -633,6 +551,7 @@ function Invoke-RegistryUninstall { param($App)
     if (-not $found) { Write-UiLog "$($App.Name) not found in registry, skipped." 'INFO'; Add-Result $App.Name 'uninstall' 'SKIP' 'not present' }
 }
 
+# --- Bloat removal (AppX per-user + DISM features) --------------------------
 function Remove-BloatPackage {
     param([string]$Name, [string]$Match)
     $pkgs = Get-AppxPackage -Name "*$Match*" -ErrorAction SilentlyContinue
@@ -667,6 +586,7 @@ function Invoke-RemoveBloat {
     Remove-QuickAssist
 }
 
+# --- Start menu grid layout (Win11) -----------------------------------------
 function Invoke-StartGridLayout {
     $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
     try {
@@ -676,6 +596,7 @@ function Invoke-StartGridLayout {
     } catch { Write-UiLog "Start grid setting failed: $_" 'WARN' }
 }
 
+# --- Windows Update (PSWindowsUpdate) ---------------------------------------
 function Invoke-WindowsUpdates {
     Write-UiLog "Preparing Windows Update..."
     Set-UiStatus "Checking for Windows updates..."
@@ -690,6 +611,7 @@ function Invoke-WindowsUpdates {
         }
         Import-Module PSWindowsUpdate -ErrorAction Stop
         Write-UiLog "Scanning for updates (including optional)..."
+        # Include driver updates and optional updates. AcceptAll auto-accepts EULAs.
         Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -IgnoreReboot -ErrorAction Stop |
             ForEach-Object {
                 $st = if ($_.Result) { $_.Result } else { 'queued' }
@@ -703,6 +625,7 @@ function Invoke-WindowsUpdates {
     }
 }
 
+# --- GPU driver auto-detect and install -------------------------------------
 function Get-GpuVendor {
     $gpus = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -notmatch 'Virtual|Basic|Parsec|Remote' }
@@ -714,10 +637,14 @@ function Get-GpuVendor {
 }
 
 function Get-AdrenalinDownloadUrl {
+    # Scrape AMD's driver page for the current Adrenalin download. This is
+    # fragile by design - AMD changes markup without notice. On failure the
+    # caller logs a clear error and instructs manual install.
     $driversPage = 'https://www.amd.com/en/support/download/drivers.html'
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
         $html = (Invoke-WebRequest -UseBasicParsing -Uri $driversPage -TimeoutSec 30 -UserAgent 'Mozilla/5.0').Content
+        # Look for the full-package Adrenalin installer URL
         $matches = [regex]::Matches($html, 'https://[^"'']*?adrenalin[^"'']*?\.exe', 'IgnoreCase')
         if ($matches.Count -gt 0) { return $matches[0].Value }
     } catch { Write-UiLog "Adrenalin page scrape failed: $_" 'WARN' }
@@ -744,10 +671,15 @@ function Install-GpuDriver {
             return
         }
         Write-UiLog "Adrenalin URL: $url"
-        Invoke-DirectInstall -App @{ Name='AMD Adrenalin'; DownloadUrl=$url; SilentArgs='-install' }
+        Invoke-DirectInstall -App @{
+            Name='AMD Adrenalin'
+            DownloadUrl=$url
+            SilentArgs='-install'
+        }
     }
 }
 
+# --- Tweaks ---
 function Invoke-TweakPowerNever {
     Write-UiLog "Setting power timeouts to never..."
     powercfg -change -monitor-timeout-ac 0; powercfg -change -monitor-timeout-dc 0
@@ -837,11 +769,13 @@ try {
 
     if ($mode -eq 'Install') {
         Write-UiLog "=============== INSTALL RUN STARTED ==============="
+        # Count tasks for progress
         $tweakCount = (($tweaks.Values | Where-Object { $_ }) | Measure-Object).Count
         $optCount   = (($opts.Values   | Where-Object { $_ }) | Measure-Object).Count
         $total = [Math]::Max(1, $apps.Count + $tweakCount + $optCount)
         $done  = 0
 
+        # Install apps first
         if (($apps | Where-Object { $_.Source -eq 'choco' }).Count -gt 0 -and -not (Test-ChocoInstalled)) {
             Install-Chocolatey
         }
@@ -861,6 +795,7 @@ try {
             $done++; Set-UiProgress (($done / $total) * 100)
         }
 
+        # Windows Update BEFORE GPU driver (so GPU driver from WU doesn't clobber our install)
         if ($opts.WindowsUpdate) {
             Set-UiStatus "Windows Update..."; Invoke-WindowsUpdates
             $done++; Set-UiProgress (($done / $total) * 100)
@@ -870,6 +805,7 @@ try {
             $done++; Set-UiProgress (($done / $total) * 100)
         }
 
+        # Tweaks
         $tweakList = @(
             @{K='PowerNever';       L='Set power plan';    A={ Invoke-TweakPowerNever }}
             @{K='DisableHibernate'; L='Disable hibernate'; A={ Invoke-TweakDisableHibernate }}
@@ -911,10 +847,6 @@ try {
         Set-UiProgress 100
         Write-UiLog "=============== UNINSTALL RUN COMPLETE ============"
         if ($sync.GenerateReport) { New-BenchReport }
-    }
-    # Clean up cached 7-Zip at pipeline end unless debugging
-    if (-not $sync.KeepTemp -and $sync.SevenZipPath -and (Test-Path $sync.SevenZipPath)) {
-        Remove-Item $sync.SevenZipPath -Force -ErrorAction SilentlyContinue
     }
 }
 catch { Write-UiLog "Pipeline fatal: $_" 'ERROR' }
