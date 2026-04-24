@@ -938,7 +938,7 @@ function Start-Pipeline {
     $ps = [PowerShell]::Create()
     $ps.Runspace = $rs
     $null = $ps.AddScript($pipelineCode)
-    $null = $ps.BeginInvoke()
+    $ps.Invoke()
 }
 
 $controls.BtnQuit.Add_Click({ $window.Close() })
