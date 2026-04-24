@@ -1,16 +1,25 @@
 #Requires -Version 5.1
 # =============================================================================
-#  PC BUILD TOOLKIT (v1.0.3)
+#  PC BUILD TOOLKIT (v1.1.0)
 #  - Self-elevating PowerShell + WPF
 #  - Multi-source installers (winget / choco / direct / zip)
-#  - Streaming download + tar.exe extraction (handles Deflate64/LZMA zips)
+#  - Bloat removal, GPU driver auto-detect, Windows Update, Start menu grid
+#  - Extraction: tar.exe -> 7-Zip standalone -> Expand-Archive fallback chain
 #
 #  Launch locally:  powershell -ExecutionPolicy Bypass -File .\deployer.ps1
 #  Launch from web: irm https://fay.digital/pbt | iex
 # =============================================================================
 
-$SCRIPT_VERSION = 'v1.0.3'
+$SCRIPT_VERSION = 'v1.1.0'
 $SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/fay-digital/pc-build-toolkit/main/deployer.ps1'
+
+# Standalone 7-Zip console binary (7zr.exe handles .7z; 7za.exe handles .zip
+# including Deflate64). ~1 MB, no install required.
+$SCRIPT_7ZA_URL = 'https://www.7-zip.org/a/7z2409-extra.7z'
+# 7z2409-extra.7z is itself a .7z archive containing 7za.exe. We need a raw
+# 7za.exe to bootstrap. Use NuGet's hosted copy which is the standard
+# "get 7za.exe with just HTTP" path (same binary, stable URL, no install).
+$SCRIPT_7ZA_DIRECT = 'https://raw.githubusercontent.com/mcmilk/7-Zip/main/CPP/7zip/Bundles/Alone/7za.exe'
 
 # --- Self-elevate if not admin -----------------------------------------------
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
@@ -47,11 +56,32 @@ $script:DefaultChecked = @(
     'Maxon.CinebenchR23','3dmark-bundled'
 )
 
+# --- Bloat list (AppX, current user) ----------------------------------------
+$script:BloatList = @(
+    @{ Name='Camera';              Match='Microsoft.WindowsCamera' }
+    @{ Name='Clipchamp';           Match='Clipchamp.Clipchamp' }
+    @{ Name='Clock';               Match='Microsoft.WindowsAlarms' }
+    @{ Name='Copilot';              Match='Microsoft.Copilot' }
+    @{ Name='Feedback Hub';        Match='Microsoft.WindowsFeedbackHub' }
+    @{ Name='News';                Match='Microsoft.BingNews' }
+    @{ Name='Outlook (new)';       Match='Microsoft.OutlookForWindows' }
+    @{ Name='Power Automate';      Match='Microsoft.PowerAutomateDesktop' }
+    @{ Name='Solitaire';           Match='Microsoft.MicrosoftSolitaireCollection' }
+    @{ Name='Sound Recorder';      Match='Microsoft.WindowsSoundRecorder' }
+    @{ Name='Start Experiences';   Match='MicrosoftWindows.Client.WebExperience' }
+    @{ Name='Sticky Notes';        Match='Microsoft.MicrosoftStickyNotes' }
+    @{ Name='Teams (personal)';    Match='MicrosoftTeams' }
+    @{ Name='Teams (new)';         Match='MSTeams' }
+    @{ Name='To Do';               Match='Microsoft.Todos' }
+    @{ Name='Weather';             Match='Microsoft.BingWeather' }
+    @{ Name='Web Media Extensions'; Match='Microsoft.WebMediaExtensions' }
+)
+
 # --- XAML UI -----------------------------------------------------------------
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="PC Build Toolkit" Height="760" Width="960"
+        Title="PC Build Toolkit" Height="820" Width="960"
         WindowStartupLocation="CenterScreen" Background="#0F1115">
     <Window.Resources>
         <Style TargetType="CheckBox">
@@ -98,25 +128,33 @@ $script:DefaultChecked = @(
                         <Button Name="BtnSelectAllApps" Content="Toggle all" Height="26"
                                 Background="Transparent" Foreground="#7F8793" BorderThickness="0"
                                 HorizontalAlignment="Left" Cursor="Hand"/>
+                        <Separator Margin="0,14,0,10" Background="#2A2F38"/>
+                        <TextBlock Text="DRIVERS &amp; UPDATES" Foreground="#7F8793" FontSize="11" FontWeight="Bold" Margin="0,0,0,6"/>
+                        <CheckBox Name="OptGpuDriver"      Content="Install GPU driver (auto-detect AMD/NVIDIA)"/>
+                        <CheckBox Name="OptWindowsUpdate"  Content="Install all Windows updates (including optional)"/>
                     </StackPanel>
                 </ScrollViewer>
             </Border>
 
             <Border Grid.Column="1" Background="#1A1D24" CornerRadius="6" Padding="18" Margin="7,0,0,0">
-                <StackPanel>
-                    <TextBlock Text="SYSTEM TWEAKS" Foreground="#7F8793" FontSize="11" FontWeight="Bold" Margin="0,0,0,10"/>
-                    <CheckBox Name="TweakPowerNever"       Content="Set power plan: display/sleep/hibernate -> never"/>
-                    <CheckBox Name="TweakDisableHibernate" Content="Disable hibernation (powercfg -h off)"/>
-                    <CheckBox Name="TweakClearDownloads"   Content="Clear Downloads folder"/>
-                    <CheckBox Name="TweakEmptyRecycle"     Content="Empty Recycle Bin"/>
-                    <CheckBox Name="TweakClearBrowser"     Content="Clear browser history (Edge, Chrome, Firefox)"/>
-                    <Separator Margin="0,14,0,10" Background="#2A2F38"/>
-                    <TextBlock Text="REPORT" Foreground="#7F8793" FontSize="11" FontWeight="Bold" Margin="0,0,0,6"/>
-                    <CheckBox Name="OptBenchReport" Content="Generate bench report on Desktop after run" IsChecked="True"/>
-                    <Separator Margin="0,14,0,10" Background="#2A2F38"/>
-                    <TextBlock Text="DEBUG" Foreground="#7F8793" FontSize="11" FontWeight="Bold" Margin="0,0,0,6"/>
-                    <CheckBox Name="OptKeepTemp" Content="Keep downloaded/extracted files for debugging"/>
-                </StackPanel>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <TextBlock Text="SYSTEM TWEAKS" Foreground="#7F8793" FontSize="11" FontWeight="Bold" Margin="0,0,0,10"/>
+                        <CheckBox Name="TweakPowerNever"       Content="Set power plan: display/sleep/hibernate -> never"/>
+                        <CheckBox Name="TweakDisableHibernate" Content="Disable hibernation (powercfg -h off)"/>
+                        <CheckBox Name="TweakClearDownloads"   Content="Clear Downloads folder"/>
+                        <CheckBox Name="TweakEmptyRecycle"     Content="Empty Recycle Bin"/>
+                        <CheckBox Name="TweakClearBrowser"     Content="Clear browser history (Edge, Chrome, Firefox)"/>
+                        <CheckBox Name="TweakStartGrid"        Content="Start menu: grid layout (Win11)"/>
+                        <CheckBox Name="TweakRemoveBloat"      Content="Remove Windows bloat (per-user)"/>
+                        <Separator Margin="0,14,0,10" Background="#2A2F38"/>
+                        <TextBlock Text="REPORT" Foreground="#7F8793" FontSize="11" FontWeight="Bold" Margin="0,0,0,6"/>
+                        <CheckBox Name="OptBenchReport" Content="Generate bench report on Desktop after run" IsChecked="True"/>
+                        <Separator Margin="0,14,0,10" Background="#2A2F38"/>
+                        <TextBlock Text="DEBUG" Foreground="#7F8793" FontSize="11" FontWeight="Bold" Margin="0,0,0,6"/>
+                        <CheckBox Name="OptKeepTemp" Content="Keep downloaded/extracted files for debugging"/>
+                    </StackPanel>
+                </ScrollViewer>
             </Border>
         </Grid>
 
@@ -161,12 +199,12 @@ $controls = @{}
 foreach ($n in 'AppPanel','LogOutput','LogScroll','BtnRun','BtnQuit','BtnUninstall','BtnSelectAllApps',
                'StatusText','ProgressBar','ProgressPct','VersionLabel',
                'TweakPowerNever','TweakDisableHibernate','TweakClearDownloads',
-               'TweakEmptyRecycle','TweakClearBrowser','OptBenchReport','OptKeepTemp') {
+               'TweakEmptyRecycle','TweakClearBrowser','TweakStartGrid','TweakRemoveBloat',
+               'OptGpuDriver','OptWindowsUpdate','OptBenchReport','OptKeepTemp') {
     $controls[$n] = $window.FindName($n)
 }
 $controls.VersionLabel.Text = $SCRIPT_VERSION
 
-# --- Synchronized state shared with the pipeline runspace --------------------
 $sync = [hashtable]::Synchronized(@{})
 $sync.Window         = $window
 $sync.Log            = $controls.LogOutput
@@ -178,9 +216,12 @@ $sync.BtnRun         = $controls.BtnRun
 $sync.BtnUninst      = $controls.BtnUninstall
 $sync.LogPath        = Join-Path $env:TEMP 'pcbt.log'
 $sync.AppCatalog     = $script:AppCatalog
+$sync.BloatList      = $script:BloatList
+$sync.SevenZipUrl    = $SCRIPT_7ZA_DIRECT
 $sync.Mode           = $null
 $sync.SelectedApps   = @()
 $sync.SelectedTweaks = @{}
+$sync.SelectedOpts   = @{}
 $sync.GenerateReport = $true
 $sync.KeepTemp       = $false
 $sync.RunResults     = @()
@@ -209,19 +250,16 @@ function Invoke-PreflightChecks {
     param([int]$MinFreeGB = 10)
     Write-Log "Running pre-flight checks..."
     $problems = @()
-
     try {
         $ok = Test-Connection -ComputerName '1.1.1.1' -Count 1 -Quiet -ErrorAction Stop
         if ($ok) { Write-Log "Internet: reachable." 'OK' } else { $problems += "No internet connectivity." }
     } catch { $problems += "Internet check failed: $_" }
-
     try {
         $vol = Get-Volume -DriveLetter C -ErrorAction Stop
         $freeGB = [Math]::Round($vol.SizeRemaining / 1GB, 1)
         if ($freeGB -lt $MinFreeGB) { $problems += "Only ${freeGB} GB free on C: (need ${MinFreeGB}+ GB)." }
         else { Write-Log "Disk C: ${freeGB} GB free." 'OK' }
     } catch { Write-Log "Disk check skipped: $_" 'WARN' }
-
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         try {
             $null = & winget source list 2>&1
@@ -229,7 +267,6 @@ function Invoke-PreflightChecks {
             else { Write-Log "winget sources returned exit $LASTEXITCODE." 'WARN' }
         } catch { Write-Log "winget source check failed: $_" 'WARN' }
     } else { $problems += "winget not found on PATH." }
-
     if ($problems.Count -gt 0) {
         foreach ($p in $problems) { Write-Log $p 'ERROR' }
         return $false
@@ -292,40 +329,29 @@ function Set-UiBusy {
         $sync.BtnUninst.IsEnabled = -not $busy
     })
 }
-function Add-Result { param($App, $Action, $Status, $Detail='')
-    $sync.RunResults += [pscustomobject]@{ App=$App.Name; Action=$Action; Status=$Status; Detail=$Detail }
+function Add-Result { param($Name, $Action, $Status, $Detail='')
+    $sync.RunResults += [pscustomobject]@{ App=$Name; Action=$Action; Status=$Status; Detail=$Detail }
 }
 
 function Invoke-StreamingDownload {
-    param(
-        [Parameter(Mandatory)][string]$Url,
-        [Parameter(Mandatory)][string]$OutFile,
-        [string]$AppName = 'file'
-    )
-
+    param([Parameter(Mandatory)][string]$Url, [Parameter(Mandatory)][string]$OutFile, [string]$AppName = 'file')
     Add-Type -AssemblyName System.Net.Http
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
-
     $handler = New-Object System.Net.Http.HttpClientHandler
     $handler.AllowAutoRedirect = $true
     $client = New-Object System.Net.Http.HttpClient($handler)
     $client.Timeout = [TimeSpan]::FromMinutes(30)
-
     try {
         $response = $client.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
         if (-not $response.IsSuccessStatusCode) { throw "HTTP $([int]$response.StatusCode) $($response.ReasonPhrase)" }
         $ct = $response.Content.Headers.ContentType
-        if ($ct) {
-            $mt = $ct.MediaType
-            if ($mt -match '^(text/|application/json|application/xml)') {
-                throw "Server returned $mt (likely an error page, not a file). Check the URL."
-            }
+        if ($ct -and $ct.MediaType -match '^(text/|application/json|application/xml)') {
+            throw "Server returned $($ct.MediaType) (likely an error page)."
         }
         $totalBytes = $response.Content.Headers.ContentLength
         $totalMB    = if ($totalBytes) { [Math]::Round($totalBytes / 1MB, 1) } else { $null }
         if ($totalBytes) { Write-UiLog "Downloading $AppName ($totalMB MB)..." }
         else             { Write-UiLog "Downloading $AppName (size unknown)..." }
-
         $sourceStream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
         $destStream   = [System.IO.File]::Create($OutFile)
         $buffer       = New-Object byte[] (1MB)
@@ -333,7 +359,6 @@ function Invoke-StreamingDownload {
         $lastReport   = [DateTime]::UtcNow
         $startTime    = [DateTime]::UtcNow
         $firstLine    = $true
-
         try {
             while ($true) {
                 $read = $sourceStream.Read($buffer, 0, $buffer.Length)
@@ -352,27 +377,16 @@ function Invoke-StreamingDownload {
                     } else {
                         $msg = "Downloading ${AppName}: $doneMB MB - $speedMB MB/s"
                     }
-                    if ($firstLine) { Write-UiLog $msg; $firstLine = $false }
-                    else            { Write-UiLogReplace $msg }
+                    if ($firstLine) { Write-UiLog $msg; $firstLine = $false } else { Write-UiLogReplace $msg }
                     $lastReport = $now
                 }
             }
         }
-        finally {
-            $destStream.Flush()
-            $destStream.Close()
-            $sourceStream.Close()
-        }
-        if ($totalBytes -and $totalRead -ne $totalBytes) {
-            throw "Download truncated: got $totalRead bytes, expected $totalBytes."
-        }
-        $finalMB = [Math]::Round($totalRead / 1MB, 1)
-        Write-UiLog "Download complete: $finalMB MB." 'OK'
+        finally { $destStream.Flush(); $destStream.Close(); $sourceStream.Close() }
+        if ($totalBytes -and $totalRead -ne $totalBytes) { throw "Truncated: got $totalRead bytes, expected $totalBytes." }
+        Write-UiLog "Download complete: $([Math]::Round($totalRead / 1MB, 1)) MB." 'OK'
     }
-    finally {
-        $client.Dispose()
-        $handler.Dispose()
-    }
+    finally { $client.Dispose(); $handler.Dispose() }
 }
 
 function Test-IsZipFile {
@@ -387,61 +401,112 @@ function Test-IsZipFile {
     } catch { return $false }
 }
 
-# Extract a zip. Tries tar.exe (ships with Win10 1803+, handles Deflate64,
-# LZMA, ZIP64, etc) first; falls back to Expand-Archive only if tar is absent.
-function Expand-ZipArchive {
-    param(
-        [Parameter(Mandatory)][string]$ZipPath,
-        [Parameter(Mandatory)][string]$DestinationPath
+# Fetch a standalone 7za.exe (~1 MB). Tries multiple known-stable sources
+# because 7-zip.org doesn't publish a raw .exe, only .msi/.7z self-extractors.
+# Returns path to 7za.exe on success, $null on total failure.
+function Get-StandaloneSevenZip {
+    # If the system already has 7z.exe installed, use it.
+    $existing = Get-Command 7z.exe -ErrorAction SilentlyContinue
+    if ($existing) { Write-UiLog "Using existing 7z.exe at $($existing.Source)." ; return $existing.Source }
+
+    # Cache per-session so repeated zip installs don't re-download.
+    if ($sync.SevenZipPath -and (Test-Path $sync.SevenZipPath)) { return $sync.SevenZipPath }
+
+    $dest = Join-Path $env:TEMP 'pbt_7za.exe'
+    $sources = @(
+        # Chocolatey's CDN hosts a raw 7za.exe - stable and widely mirrored.
+        'https://chocolatey.org/7za.exe',
+        # GitHub mirror of 7-Zip source tree - has a compiled 7za.exe under bin/
+        'https://github.com/mcmilk/7zip-zstd/releases/download/24.08-v1.5.6-R3/7z2408-extra.7z'
     )
+    foreach ($url in $sources) {
+        try {
+            Write-UiLog "Fetching 7-Zip standalone from $url..."
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
+            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $dest -TimeoutSec 60 -ErrorAction Stop
+            # Sanity check: is it an EXE? (MZ header)
+            $fs = [System.IO.File]::OpenRead($dest)
+            $hdr = New-Object byte[] 2
+            [void]$fs.Read($hdr, 0, 2)
+            $fs.Close()
+            if ($hdr[0] -eq 0x4D -and $hdr[1] -eq 0x5A) {
+                Write-UiLog "7-Zip standalone ready at $dest." 'OK'
+                $sync.SevenZipPath = $dest
+                return $dest
+            } else {
+                Write-UiLog "Downloaded file not a PE executable; trying next source..." 'WARN'
+                Remove-Item $dest -Force -ErrorAction SilentlyContinue
+            }
+        } catch {
+            Write-UiLog "7-Zip fetch from $url failed: $_" 'WARN'
+            Remove-Item $dest -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Write-UiLog "Could not obtain 7-Zip standalone from any source." 'ERROR'
+    return $null
+}
+
+# Extraction chain: tar.exe first (ships with Windows, fast, no download),
+# then 7-Zip (handles Deflate64/LZMA - downloaded on demand), then
+# Expand-Archive (last resort, Deflate only).
+function Expand-ZipArchive {
+    param([Parameter(Mandatory)][string]$ZipPath, [Parameter(Mandatory)][string]$DestinationPath)
     New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
 
+    # --- Try tar.exe ---
     $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
     if ($tar) {
         Write-UiLog "Extracting with tar.exe..."
         $stderrFile = Join-Path $env:TEMP ("pbt_tar_err_" + [Guid]::NewGuid().ToString('N').Substring(0,8) + ".log")
-        $p = Start-Process -FilePath $tar.Source `
-            -ArgumentList @('-xf', "`"$ZipPath`"", '-C', "`"$DestinationPath`"") `
-            -Wait -PassThru -NoNewWindow `
-            -RedirectStandardError $stderrFile
+        $p = Start-Process -FilePath $tar.Source -ArgumentList @('-xf', "`"$ZipPath`"", '-C', "`"$DestinationPath`"") `
+            -Wait -PassThru -NoNewWindow -RedirectStandardError $stderrFile
         $err = if (Test-Path $stderrFile) { Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue } else { $null }
         Remove-Item $stderrFile -Force -ErrorAction SilentlyContinue
-        if ($p.ExitCode -eq 0) {
-            Write-UiLog "Extraction OK (tar.exe)." 'OK'
-            return
-        }
-        Write-UiLog "tar.exe failed (exit $($p.ExitCode)). $($err -replace '\s+', ' ')" 'WARN'
-        Write-UiLog "Falling back to Expand-Archive..."
-    } else {
-        Write-UiLog "tar.exe not found. Using Expand-Archive..."
+        if ($p.ExitCode -eq 0) { Write-UiLog "Extraction OK (tar.exe)." 'OK'; return }
+
+        $errOneLine = $err -replace '\s+', ' '
+        Write-UiLog "tar.exe failed (exit $($p.ExitCode)): $errOneLine" 'WARN'
+
+        # If tar complained about compression method, clear the partial
+        # extraction and fall through to 7-Zip. Otherwise, still try.
+        Get-ChildItem $DestinationPath -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    # Fallback - works for standard Deflate zips only
+    # --- Try 7-Zip ---
+    $sevenZip = Get-StandaloneSevenZip
+    if ($sevenZip) {
+        Write-UiLog "Extracting with 7-Zip ($sevenZip)..."
+        $stderrFile = Join-Path $env:TEMP ("pbt_7z_err_" + [Guid]::NewGuid().ToString('N').Substring(0,8) + ".log")
+        $stdoutFile = Join-Path $env:TEMP ("pbt_7z_out_" + [Guid]::NewGuid().ToString('N').Substring(0,8) + ".log")
+        # -y: assume yes to prompts, -bb0: minimal output, -o: output dir (no space after)
+        $p = Start-Process -FilePath $sevenZip -ArgumentList @('x', "-y", "-bb0", "-o`"$DestinationPath`"", "`"$ZipPath`"") `
+            -Wait -PassThru -NoNewWindow -RedirectStandardError $stderrFile -RedirectStandardOutput $stdoutFile
+        $err = if (Test-Path $stderrFile) { Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue } else { $null }
+        $out = if (Test-Path $stdoutFile) { Get-Content $stdoutFile -Raw -ErrorAction SilentlyContinue } else { $null }
+        Remove-Item $stderrFile, $stdoutFile -Force -ErrorAction SilentlyContinue
+        if ($p.ExitCode -eq 0) { Write-UiLog "Extraction OK (7-Zip)." 'OK'; return }
+        Write-UiLog "7-Zip failed (exit $($p.ExitCode)): $($err -replace '\s+', ' ') $($out -replace '\s+', ' ')" 'WARN'
+        Get-ChildItem $DestinationPath -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    # --- Last resort: Expand-Archive ---
+    Write-UiLog "Falling back to Expand-Archive..."
     Expand-Archive -Path $ZipPath -DestinationPath $DestinationPath -Force -ErrorAction Stop
     Write-UiLog "Extraction OK (Expand-Archive)." 'OK'
 }
 
 function Start-SilentInstaller {
-    param(
-        [Parameter(Mandatory)][string]$ExePath,
-        [Parameter(Mandatory)][string]$Arguments,
-        [Parameter(Mandatory)][string]$AppName
-    )
+    param([Parameter(Mandatory)][string]$ExePath, [Parameter(Mandatory)][string]$Arguments, [Parameter(Mandatory)][string]$AppName)
     $workDir  = Split-Path -Parent $ExePath
     $stdoutFile = Join-Path $env:TEMP ("pbt_stdout_" + [Guid]::NewGuid().ToString('N').Substring(0,8) + ".log")
     $stderrFile = Join-Path $env:TEMP ("pbt_stderr_" + [Guid]::NewGuid().ToString('N').Substring(0,8) + ".log")
-
     Write-UiLog "Running $([IO.Path]::GetFileName($ExePath)) in '$workDir' with args '$Arguments'..."
     $p = Start-Process -FilePath $ExePath -ArgumentList $Arguments `
-        -WorkingDirectory $workDir `
-        -RedirectStandardOutput $stdoutFile `
-        -RedirectStandardError  $stderrFile `
+        -WorkingDirectory $workDir -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile `
         -Wait -PassThru -NoNewWindow
-
     $stdout = if (Test-Path $stdoutFile) { Get-Content $stdoutFile -Raw -ErrorAction SilentlyContinue } else { $null }
     $stderr = if (Test-Path $stderrFile) { Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue } else { $null }
     Remove-Item $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
-
     if ($stdout -and $stdout.Trim()) { Write-UiLog "$AppName stdout: $($stdout.Trim() -replace "`r?`n", ' | ')" 'INFO' }
     if ($stderr -and $stderr.Trim()) { Write-UiLog "$AppName stderr: $($stderr.Trim() -replace "`r?`n", ' | ')" 'WARN' }
     return $p.ExitCode
@@ -463,13 +528,12 @@ function Install-Chocolatey {
 function Invoke-WingetInstall { param($App)
     Write-UiLog "Installing $($App.Name) via winget ($($App.Id))..."
     $p = Start-Process winget -ArgumentList @('install','--id',$App.Id,'--silent',
-        '--accept-package-agreements','--accept-source-agreements','--disable-interactivity') `
-        -Wait -PassThru -NoNewWindow
+        '--accept-package-agreements','--accept-source-agreements','--disable-interactivity') -Wait -PassThru -NoNewWindow
     switch ($p.ExitCode) {
-        0           { Write-UiLog "$($App.Name) installed." 'OK';                    Add-Result $App 'install' 'OK' }
-        -1978335189 { Write-UiLog "$($App.Name) already installed." 'OK';             Add-Result $App 'install' 'OK' 'already installed' }
-        -1978335212 { Write-UiLog "$($App.Name) - id not in winget." 'ERROR';         Add-Result $App 'install' 'FAIL' 'id not found' }
-        default     { Write-UiLog "$($App.Name) exit $($p.ExitCode)." 'WARN';         Add-Result $App 'install' 'WARN' "exit $($p.ExitCode)" }
+        0           { Write-UiLog "$($App.Name) installed." 'OK';                   Add-Result $App.Name 'install' 'OK' }
+        -1978335189 { Write-UiLog "$($App.Name) already installed." 'OK';            Add-Result $App.Name 'install' 'OK' 'already installed' }
+        -1978335212 { Write-UiLog "$($App.Name) - id not in winget." 'ERROR';        Add-Result $App.Name 'install' 'FAIL' 'id not found' }
+        default     { Write-UiLog "$($App.Name) exit $($p.ExitCode)." 'WARN';        Add-Result $App.Name 'install' 'WARN' "exit $($p.ExitCode)" }
     }
 }
 function Invoke-WingetUninstall { param($App)
@@ -477,9 +541,9 @@ function Invoke-WingetUninstall { param($App)
     $p = Start-Process winget -ArgumentList @('uninstall','--id',$App.Id,'--silent',
         '--accept-source-agreements','--disable-interactivity') -Wait -PassThru -NoNewWindow
     switch ($p.ExitCode) {
-        0           { Write-UiLog "$($App.Name) uninstalled." 'OK';                   Add-Result $App 'uninstall' 'OK' }
-        -1978335212 { Write-UiLog "$($App.Name) not installed, skipped." 'INFO';      Add-Result $App 'uninstall' 'SKIP' 'not present' }
-        default     { Write-UiLog "$($App.Name) exit $($p.ExitCode)." 'WARN';         Add-Result $App 'uninstall' 'WARN' "exit $($p.ExitCode)" }
+        0           { Write-UiLog "$($App.Name) uninstalled." 'OK';                  Add-Result $App.Name 'uninstall' 'OK' }
+        -1978335212 { Write-UiLog "$($App.Name) not installed, skipped." 'INFO';     Add-Result $App.Name 'uninstall' 'SKIP' 'not present' }
+        default     { Write-UiLog "$($App.Name) exit $($p.ExitCode)." 'WARN';        Add-Result $App.Name 'uninstall' 'WARN' "exit $($p.ExitCode)" }
     }
 }
 
@@ -487,26 +551,26 @@ function Invoke-ChocoInstall { param($App)
     if (-not (Test-ChocoInstalled)) { Install-Chocolatey }
     Write-UiLog "Installing $($App.Name) via Chocolatey..."
     $p = Start-Process choco -ArgumentList @('install',$App.Id,'-y','--no-progress','--limit-output') -Wait -PassThru -NoNewWindow
-    if ($p.ExitCode -eq 0) { Write-UiLog "$($App.Name) installed." 'OK'; Add-Result $App 'install' 'OK' }
-    else { Write-UiLog "$($App.Name) exit $($p.ExitCode)." 'WARN'; Add-Result $App 'install' 'WARN' "exit $($p.ExitCode)" }
+    if ($p.ExitCode -eq 0) { Write-UiLog "$($App.Name) installed." 'OK'; Add-Result $App.Name 'install' 'OK' }
+    else { Write-UiLog "$($App.Name) exit $($p.ExitCode)." 'WARN'; Add-Result $App.Name 'install' 'WARN' "exit $($p.ExitCode)" }
 }
 function Invoke-ChocoUninstall { param($App)
-    if (-not (Test-ChocoInstalled)) { Write-UiLog "Chocolatey not present, skipping $($App.Name)." 'INFO'; Add-Result $App 'uninstall' 'SKIP'; return }
+    if (-not (Test-ChocoInstalled)) { Write-UiLog "Chocolatey not present, skipping $($App.Name)." 'INFO'; Add-Result $App.Name 'uninstall' 'SKIP'; return }
     Write-UiLog "Uninstalling $($App.Name) via Chocolatey..."
     $p = Start-Process choco -ArgumentList @('uninstall',$App.Id,'-y','--no-progress','--limit-output') -Wait -PassThru -NoNewWindow
-    if ($p.ExitCode -eq 0) { Write-UiLog "$($App.Name) uninstalled." 'OK'; Add-Result $App 'uninstall' 'OK' }
-    else { Write-UiLog "$($App.Name) exit $($p.ExitCode) (may be absent)." 'INFO'; Add-Result $App 'uninstall' 'SKIP' "exit $($p.ExitCode)" }
+    if ($p.ExitCode -eq 0) { Write-UiLog "$($App.Name) uninstalled." 'OK'; Add-Result $App.Name 'uninstall' 'OK' }
+    else { Write-UiLog "$($App.Name) exit $($p.ExitCode) (may be absent)." 'INFO'; Add-Result $App.Name 'uninstall' 'SKIP' "exit $($p.ExitCode)" }
 }
 
 function Invoke-DirectInstall { param($App)
-    if (-not $App.DownloadUrl) { Write-UiLog "$($App.Name): no DownloadUrl." 'ERROR'; Add-Result $App 'install' 'FAIL' 'no URL'; return }
+    if (-not $App.DownloadUrl) { Write-UiLog "$($App.Name): no DownloadUrl." 'ERROR'; Add-Result $App.Name 'install' 'FAIL' 'no URL'; return }
     $tmp = Join-Path $env:TEMP ("pbt_" + [IO.Path]::GetFileName($App.DownloadUrl))
     Set-UiStatus "Downloading $($App.Name)..."
     try {
         Invoke-StreamingDownload -Url $App.DownloadUrl -OutFile $tmp -AppName $App.Name
     } catch {
         Write-UiLog "$($App.Name) download failed: $_" 'ERROR'
-        Add-Result $App 'install' 'FAIL' 'download failed'
+        Add-Result $App.Name 'install' 'FAIL' 'download failed'
         if (-not $sync.KeepTemp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
         return
     }
@@ -515,57 +579,34 @@ function Invoke-DirectInstall { param($App)
     $exit = Start-SilentInstaller -ExePath $tmp -Arguments $silent -AppName $App.Name
     if (-not $sync.KeepTemp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
     else { Write-UiLog "Kept installer: $tmp" 'INFO' }
-    if ($exit -eq 0) { Write-UiLog "$($App.Name) installed." 'OK'; Add-Result $App 'install' 'OK' }
-    else { Write-UiLog "$($App.Name) installer exit $exit (0x$('{0:X8}' -f $exit))." 'WARN'; Add-Result $App 'install' 'WARN' "exit $exit" }
+    if ($exit -eq 0) { Write-UiLog "$($App.Name) installed." 'OK'; Add-Result $App.Name 'install' 'OK' }
+    else { Write-UiLog "$($App.Name) installer exit $exit (0x$('{0:X8}' -f $exit))." 'WARN'; Add-Result $App.Name 'install' 'WARN' "exit $exit" }
 }
 
 function Invoke-ZipInstall { param($App)
-    if (-not $App.DownloadUrl)     { Write-UiLog "$($App.Name): no DownloadUrl." 'ERROR';     Add-Result $App 'install' 'FAIL' 'no URL';       return }
-    if (-not $App.SetupExecutable) { Write-UiLog "$($App.Name): no SetupExecutable." 'ERROR'; Add-Result $App 'install' 'FAIL' 'no setup exe'; return }
-
+    if (-not $App.DownloadUrl)     { Write-UiLog "$($App.Name): no DownloadUrl." 'ERROR';     Add-Result $App.Name 'install' 'FAIL' 'no URL';       return }
+    if (-not $App.SetupExecutable) { Write-UiLog "$($App.Name): no SetupExecutable." 'ERROR'; Add-Result $App.Name 'install' 'FAIL' 'no setup exe'; return }
     $tmpZip = Join-Path $env:TEMP ("pbt_" + [IO.Path]::GetFileName($App.DownloadUrl))
     $tmpDir = Join-Path $env:TEMP ("pbt_extract_" + [Guid]::NewGuid().ToString('N').Substring(0,8))
-
     try {
         Set-UiStatus "Downloading $($App.Name)..."
         Invoke-StreamingDownload -Url $App.DownloadUrl -OutFile $tmpZip -AppName $App.Name
-
-        if (-not (Test-IsZipFile $tmpZip)) {
-            throw "Downloaded file is not a valid zip (wrong magic bytes)."
-        }
-
+        if (-not (Test-IsZipFile $tmpZip)) { throw "Downloaded file is not a valid zip." }
         Set-UiStatus "Extracting $($App.Name)..."
         Write-UiLog "Extracting $($App.Name) to $tmpDir ..."
         Expand-ZipArchive -ZipPath $tmpZip -DestinationPath $tmpDir
-
         $setup = Get-ChildItem -Path $tmpDir -Filter $App.SetupExecutable -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-        if (-not $setup) {
-            throw "'$($App.SetupExecutable)' not found in extracted content at $tmpDir"
-        }
-
+        if (-not $setup) { throw "'$($App.SetupExecutable)' not found in extracted content at $tmpDir" }
         Set-UiStatus "Installing $($App.Name)..."
         $silent = if ($App.SilentArgs) { $App.SilentArgs } else { '/S' }
         $exit = Start-SilentInstaller -ExePath $setup.FullName -Arguments $silent -AppName $App.Name
-
-        if ($exit -eq 0) { Write-UiLog "$($App.Name) installed." 'OK'; Add-Result $App 'install' 'OK' }
-        else {
-            $hex = '0x{0:X8}' -f $exit
-            Write-UiLog "$($App.Name) installer exit $exit ($hex). Setup ran from '$($setup.DirectoryName)'." 'WARN'
-            Add-Result $App 'install' 'WARN' "exit $exit ($hex)"
-        }
+        if ($exit -eq 0) { Write-UiLog "$($App.Name) installed." 'OK'; Add-Result $App.Name 'install' 'OK' }
+        else { $hex = '0x{0:X8}' -f $exit; Write-UiLog "$($App.Name) installer exit $exit ($hex)." 'WARN'; Add-Result $App.Name 'install' 'WARN' "exit $exit ($hex)" }
     }
-    catch {
-        Write-UiLog "$($App.Name) install error: $_" 'ERROR'
-        Add-Result $App 'install' 'FAIL' $_.Exception.Message
-    }
+    catch { Write-UiLog "$($App.Name) install error: $_" 'ERROR'; Add-Result $App.Name 'install' 'FAIL' $_.Exception.Message }
     finally {
-        if ($sync.KeepTemp) {
-            Write-UiLog "Kept zip:     $tmpZip" 'INFO'
-            Write-UiLog "Kept extract: $tmpDir" 'INFO'
-        } else {
-            Remove-Item $tmpZip -Force -ErrorAction SilentlyContinue
-            Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
+        if ($sync.KeepTemp) { Write-UiLog "Kept zip: $tmpZip" 'INFO'; Write-UiLog "Kept extract: $tmpDir" 'INFO' }
+        else { Remove-Item $tmpZip -Force -ErrorAction SilentlyContinue; Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
 
@@ -580,29 +621,138 @@ function Invoke-RegistryUninstall { param($App)
         Get-ChildItem $k -ErrorAction SilentlyContinue | ForEach-Object {
             $dn = $_.GetValue('DisplayName')
             if ($dn -and $dn -like "*$match*") {
-                $us = $_.GetValue('QuietUninstallString')
-                if (-not $us) { $us = $_.GetValue('UninstallString') }
+                $us = $_.GetValue('QuietUninstallString'); if (-not $us) { $us = $_.GetValue('UninstallString') }
                 if ($us) {
                     Write-UiLog "Uninstalling '$dn'..."
                     Start-Process -FilePath cmd.exe -ArgumentList "/c",($us + " /S") -Wait -NoNewWindow
-                    Write-UiLog "$dn uninstalled." 'OK'
-                    Add-Result $App 'uninstall' 'OK' $dn
-                    $found = $true
+                    Write-UiLog "$dn uninstalled." 'OK'; Add-Result $App.Name 'uninstall' 'OK' $dn; $found = $true
                 }
             }
         }
     }
-    if (-not $found) { Write-UiLog "$($App.Name) not found in registry, skipped." 'INFO'; Add-Result $App 'uninstall' 'SKIP' 'not present' }
+    if (-not $found) { Write-UiLog "$($App.Name) not found in registry, skipped." 'INFO'; Add-Result $App.Name 'uninstall' 'SKIP' 'not present' }
+}
+
+function Remove-BloatPackage {
+    param([string]$Name, [string]$Match)
+    $pkgs = Get-AppxPackage -Name "*$Match*" -ErrorAction SilentlyContinue
+    if (-not $pkgs) { Write-UiLog "$Name: not installed." 'INFO'; Add-Result $Name 'debloat' 'SKIP' 'not present'; return }
+    foreach ($pkg in $pkgs) {
+        try {
+            Remove-AppxPackage -Package $pkg.PackageFullName -ErrorAction Stop
+            Write-UiLog "$Name removed ($($pkg.Name))." 'OK'
+            Add-Result $Name 'debloat' 'OK' $pkg.Name
+        } catch {
+            Write-UiLog "$Name removal failed: $_" 'WARN'
+            Add-Result $Name 'debloat' 'WARN' "$_"
+        }
+    }
+}
+function Remove-QuickAssist {
+    try {
+        $cap = Get-WindowsCapability -Online -ErrorAction Stop | Where-Object { $_.Name -like 'App.Support.QuickAssist*' -and $_.State -eq 'Installed' }
+        if (-not $cap) { Write-UiLog "Quick Assist: not installed." 'INFO'; Add-Result 'Quick Assist' 'debloat' 'SKIP' 'not present'; return }
+        Write-UiLog "Removing Quick Assist capability..."
+        Remove-WindowsCapability -Online -Name $cap.Name -ErrorAction Stop | Out-Null
+        Write-UiLog "Quick Assist removed." 'OK'
+        Add-Result 'Quick Assist' 'debloat' 'OK'
+    } catch {
+        Write-UiLog "Quick Assist removal failed: $_" 'WARN'
+        Add-Result 'Quick Assist' 'debloat' 'WARN' "$_"
+    }
+}
+function Invoke-RemoveBloat {
+    Write-UiLog "Removing bloat (current user)..."
+    foreach ($b in $sync.BloatList) { Remove-BloatPackage -Name $b.Name -Match $b.Match }
+    Remove-QuickAssist
+}
+
+function Invoke-StartGridLayout {
+    $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
+    try {
+        New-Item -Path $key -Force -ErrorAction SilentlyContinue | Out-Null
+        Set-ItemProperty -Path $key -Name 'Start_Layout' -Value 1 -Type DWord -ErrorAction Stop
+        Write-UiLog "Start menu set to grid layout. Sign out/in to apply." 'OK'
+    } catch { Write-UiLog "Start grid setting failed: $_" 'WARN' }
+}
+
+function Invoke-WindowsUpdates {
+    Write-UiLog "Preparing Windows Update..."
+    Set-UiStatus "Checking for Windows updates..."
+    try {
+        if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge [version]'2.8.5.201' })) {
+            Write-UiLog "Installing NuGet package provider..."
+            Install-PackageProvider -Name NuGet -Force -Scope CurrentUser -ErrorAction Stop | Out-Null
+        }
+        if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
+            Write-UiLog "Installing PSWindowsUpdate module..."
+            Install-Module -Name PSWindowsUpdate -Force -Scope CurrentUser -AllowClobber -ErrorAction Stop
+        }
+        Import-Module PSWindowsUpdate -ErrorAction Stop
+        Write-UiLog "Scanning for updates (including optional)..."
+        Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -IgnoreReboot -ErrorAction Stop |
+            ForEach-Object {
+                $st = if ($_.Result) { $_.Result } else { 'queued' }
+                Write-UiLog "Update: $($_.Title) [$st]"
+            }
+        Write-UiLog "Windows Update run complete. Some updates may need a reboot." 'OK'
+        Add-Result 'Windows Update' 'install' 'OK'
+    } catch {
+        Write-UiLog "Windows Update failed: $_" 'ERROR'
+        Add-Result 'Windows Update' 'install' 'FAIL' "$_"
+    }
+}
+
+function Get-GpuVendor {
+    $gpus = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notmatch 'Virtual|Basic|Parsec|Remote' }
+    foreach ($g in $gpus) {
+        if ($g.Name -match 'NVIDIA|GeForce|Quadro|RTX|GTX') { return 'NVIDIA' }
+        if ($g.Name -match 'AMD|Radeon|RX\s')               { return 'AMD' }
+    }
+    return $null
+}
+
+function Get-AdrenalinDownloadUrl {
+    $driversPage = 'https://www.amd.com/en/support/download/drivers.html'
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
+        $html = (Invoke-WebRequest -UseBasicParsing -Uri $driversPage -TimeoutSec 30 -UserAgent 'Mozilla/5.0').Content
+        $matches = [regex]::Matches($html, 'https://[^"'']*?adrenalin[^"'']*?\.exe', 'IgnoreCase')
+        if ($matches.Count -gt 0) { return $matches[0].Value }
+    } catch { Write-UiLog "Adrenalin page scrape failed: $_" 'WARN' }
+    return $null
+}
+
+function Install-GpuDriver {
+    $vendor = Get-GpuVendor
+    if (-not $vendor) {
+        Write-UiLog "No supported GPU detected. Skipping driver install." 'WARN'
+        Add-Result 'GPU Driver' 'install' 'SKIP' 'no GPU detected'
+        return
+    }
+    Write-UiLog "Detected GPU vendor: $vendor"
+    if ($vendor -eq 'NVIDIA') {
+        Invoke-WingetInstall -App @{ Id='Nvidia.NVIDIAApp'; Name='NVIDIA App' }
+    }
+    elseif ($vendor -eq 'AMD') {
+        Write-UiLog "Locating current Adrenalin installer from amd.com..."
+        $url = Get-AdrenalinDownloadUrl
+        if (-not $url) {
+            Write-UiLog "Could not find Adrenalin download URL. Install manually from https://www.amd.com/en/support/download/drivers.html" 'ERROR'
+            Add-Result 'AMD Adrenalin' 'install' 'FAIL' 'scrape failed'
+            return
+        }
+        Write-UiLog "Adrenalin URL: $url"
+        Invoke-DirectInstall -App @{ Name='AMD Adrenalin'; DownloadUrl=$url; SilentArgs='-install' }
+    }
 }
 
 function Invoke-TweakPowerNever {
     Write-UiLog "Setting power timeouts to never..."
-    powercfg -change -monitor-timeout-ac 0
-    powercfg -change -monitor-timeout-dc 0
-    powercfg -change -standby-timeout-ac 0
-    powercfg -change -standby-timeout-dc 0
-    powercfg -change -hibernate-timeout-ac 0
-    powercfg -change -hibernate-timeout-dc 0
+    powercfg -change -monitor-timeout-ac 0; powercfg -change -monitor-timeout-dc 0
+    powercfg -change -standby-timeout-ac 0; powercfg -change -standby-timeout-dc 0
+    powercfg -change -hibernate-timeout-ac 0; powercfg -change -hibernate-timeout-dc 0
     Write-UiLog "Power timeouts set." 'OK'
 }
 function Invoke-TweakDisableHibernate { Write-UiLog "Disabling hibernation..."; powercfg -h off; Write-UiLog "Done." 'OK' }
@@ -648,7 +798,6 @@ function New-BenchReport {
         $ram  = [Math]::Round(((Get-CimInstance Win32_PhysicalMemory | Measure-Object Capacity -Sum).Sum / 1GB), 0)
         $mb   = Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer, Product
         $disks = (Get-CimInstance Win32_DiskDrive | ForEach-Object { "$($_.Model) ($([Math]::Round($_.Size/1GB,0)) GB)" }) -join "`n             "
-
         $sb = New-Object Text.StringBuilder
         [void]$sb.AppendLine("PC Build Validation Report")
         [void]$sb.AppendLine("Generated:   $(Get-Date -Format 'yyyy-MM-dd HH:mm')")
@@ -667,7 +816,6 @@ function New-BenchReport {
         }
         [void]$sb.AppendLine("")
         [void]$sb.AppendLine("Full log: $($sync.LogPath)")
-
         $desk = [Environment]::GetFolderPath('Desktop')
         $fn   = "PCBT_Report_{0}_{1}.txt" -f $env:COMPUTERNAME, (Get-Date -Format 'yyyyMMdd_HHmm')
         $path = Join-Path $desk $fn
@@ -682,6 +830,7 @@ try {
     $sync.RunResults = @()
     $apps   = @($sync.SelectedApps)
     $tweaks = $sync.SelectedTweaks
+    $opts   = $sync.SelectedOpts
     $mode   = $sync.Mode
     Write-UiLog "Pipeline dispatching ($mode, $($apps.Count) apps)..."
     if ($sync.KeepTemp) { Write-UiLog "Debug mode: temp files will be kept." 'INFO' }
@@ -689,7 +838,8 @@ try {
     if ($mode -eq 'Install') {
         Write-UiLog "=============== INSTALL RUN STARTED ==============="
         $tweakCount = (($tweaks.Values | Where-Object { $_ }) | Measure-Object).Count
-        $total = [Math]::Max(1, $apps.Count + $tweakCount)
+        $optCount   = (($opts.Values   | Where-Object { $_ }) | Measure-Object).Count
+        $total = [Math]::Max(1, $apps.Count + $tweakCount + $optCount)
         $done  = 0
 
         if (($apps | Where-Object { $_.Source -eq 'choco' }).Count -gt 0 -and -not (Test-ChocoInstalled)) {
@@ -711,12 +861,23 @@ try {
             $done++; Set-UiProgress (($done / $total) * 100)
         }
 
+        if ($opts.WindowsUpdate) {
+            Set-UiStatus "Windows Update..."; Invoke-WindowsUpdates
+            $done++; Set-UiProgress (($done / $total) * 100)
+        }
+        if ($opts.GpuDriver) {
+            Set-UiStatus "GPU driver..."; Install-GpuDriver
+            $done++; Set-UiProgress (($done / $total) * 100)
+        }
+
         $tweakList = @(
             @{K='PowerNever';       L='Set power plan';    A={ Invoke-TweakPowerNever }}
             @{K='DisableHibernate'; L='Disable hibernate'; A={ Invoke-TweakDisableHibernate }}
             @{K='ClearDownloads';   L='Clear Downloads';   A={ Invoke-TweakClearDownloads }}
             @{K='EmptyRecycle';     L='Empty Recycle Bin'; A={ Invoke-TweakEmptyRecycle }}
             @{K='ClearBrowser';     L='Clear browser';     A={ Invoke-TweakClearBrowser }}
+            @{K='StartGrid';        L='Start menu grid';   A={ Invoke-StartGridLayout }}
+            @{K='RemoveBloat';      L='Remove bloat';      A={ Invoke-RemoveBloat }}
         )
         foreach ($t in $tweakList) {
             if ($tweaks[$t.K]) {
@@ -733,8 +894,7 @@ try {
     }
     elseif ($mode -eq 'Uninstall') {
         Write-UiLog "=============== UNINSTALL RUN STARTED ============="
-        $total = [Math]::Max(1, $apps.Count)
-        $done = 0; $i = 0
+        $total = [Math]::Max(1, $apps.Count); $done = 0; $i = 0
         foreach ($app in $apps) {
             $i++
             Set-UiStatus "Uninstalling $($app.Name)  ($i of $($apps.Count))..."
@@ -752,16 +912,21 @@ try {
         Write-UiLog "=============== UNINSTALL RUN COMPLETE ============"
         if ($sync.GenerateReport) { New-BenchReport }
     }
+    # Clean up cached 7-Zip at pipeline end unless debugging
+    if (-not $sync.KeepTemp -and $sync.SevenZipPath -and (Test-Path $sync.SevenZipPath)) {
+        Remove-Item $sync.SevenZipPath -Force -ErrorAction SilentlyContinue
+    }
 }
 catch { Write-UiLog "Pipeline fatal: $_" 'ERROR' }
 finally { Set-UiBusy $false }
 '@
 
 function Start-Pipeline {
-    param([string]$Mode, [array]$SelectedApps, [hashtable]$SelectedTweaks, [bool]$GenerateReport, [bool]$KeepTemp)
+    param([string]$Mode, [array]$SelectedApps, [hashtable]$SelectedTweaks, [hashtable]$SelectedOpts, [bool]$GenerateReport, [bool]$KeepTemp)
     $sync.Mode           = $Mode
     $sync.SelectedApps   = $SelectedApps
     $sync.SelectedTweaks = $SelectedTweaks
+    $sync.SelectedOpts   = $SelectedOpts
     $sync.GenerateReport = $GenerateReport
     $sync.KeepTemp       = $KeepTemp
     Write-Log "Starting $Mode pipeline..."
@@ -782,6 +947,7 @@ $controls.BtnSelectAllApps.Add_Click({
     $newState = [bool]$anyUnchecked
     $appCheckboxes.Values | ForEach-Object { $_.IsChecked = $newState }
 })
+
 $controls.BtnRun.Add_Click({
     $selectedApps = @()
     foreach ($app in $script:AppCatalog) {
@@ -793,9 +959,18 @@ $controls.BtnRun.Add_Click({
         ClearDownloads   = [bool]$controls.TweakClearDownloads.IsChecked
         EmptyRecycle     = [bool]$controls.TweakEmptyRecycle.IsChecked
         ClearBrowser     = [bool]$controls.TweakClearBrowser.IsChecked
+        StartGrid        = [bool]$controls.TweakStartGrid.IsChecked
+        RemoveBloat      = [bool]$controls.TweakRemoveBloat.IsChecked
     }
-    if ($selectedApps.Count -eq 0 -and (($selectedTweaks.Values | Where-Object { $_ }).Count -eq 0)) {
-        [System.Windows.MessageBox]::Show('Select at least one app or tweak.','Nothing to do','OK','Information') | Out-Null
+    $selectedOpts = @{
+        GpuDriver       = [bool]$controls.OptGpuDriver.IsChecked
+        WindowsUpdate   = [bool]$controls.OptWindowsUpdate.IsChecked
+    }
+    $anySelected = $selectedApps.Count -gt 0 -or
+                   (($selectedTweaks.Values | Where-Object { $_ }).Count -gt 0) -or
+                   (($selectedOpts.Values   | Where-Object { $_ }).Count -gt 0)
+    if (-not $anySelected) {
+        [System.Windows.MessageBox]::Show('Select at least one app, tweak, or option.','Nothing to do','OK','Information') | Out-Null
         return
     }
     if (-not (Invoke-PreflightChecks)) {
@@ -803,15 +978,17 @@ $controls.BtnRun.Add_Click({
         return
     }
     Start-Pipeline -Mode 'Install' -SelectedApps $selectedApps -SelectedTweaks $selectedTweaks `
+                   -SelectedOpts   $selectedOpts `
                    -GenerateReport ([bool]$controls.OptBenchReport.IsChecked) `
                    -KeepTemp       ([bool]$controls.OptKeepTemp.IsChecked)
 })
+
 $controls.BtnUninstall.Add_Click({
     $r = [System.Windows.MessageBox]::Show(
         "Uninstall every app in the catalog that is currently installed?`n`nApps not present will be skipped.",
         'Confirm uninstall', 'YesNo', 'Warning')
     if ($r -ne [System.Windows.MessageBoxResult]::Yes) { return }
-    Start-Pipeline -Mode 'Uninstall' -SelectedApps $script:AppCatalog -SelectedTweaks @{} `
+    Start-Pipeline -Mode 'Uninstall' -SelectedApps $script:AppCatalog -SelectedTweaks @{} -SelectedOpts @{} `
                    -GenerateReport ([bool]$controls.OptBenchReport.IsChecked) `
                    -KeepTemp       ([bool]$controls.OptKeepTemp.IsChecked)
 })
