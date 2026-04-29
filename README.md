@@ -1,3 +1,5 @@
+**Created with Claude Code.**
+
 # pc-build-toolkit
 
 A PowerShell + WPF deployer for PC build validation. Runs on a fresh Windows install with no setup — fetched and executed from a single one-liner. Installs a curated set of diagnostic and benchmarking tools, applies common bench tweaks, and produces a per-build report.
