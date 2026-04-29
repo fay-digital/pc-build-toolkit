@@ -827,6 +827,39 @@ $sync.GenerateReport = $true
 $sync.KeepTemp       = $false
 $sync.RunResults     = @()
 
+# Windows Update needs to run in a real powershell.exe console host (PSWindowsUpdate's
+# Get-WindowsUpdate -Install fails in background runspaces with "the host program does
+# not support user interaction"). The subprocess script is defined here, not inside
+# $pipelineCode, because PowerShell here-strings cannot be nested - a '@ at column 0
+# inside the outer here-string would prematurely terminate it.
+$sync.WinUpdateScript = @'
+$ErrorActionPreference = 'Continue'
+$ConfirmPreference     = 'None'
+$ProgressPreference    = 'SilentlyContinue'
+try {
+    Import-Module PSWindowsUpdate -ErrorAction Stop
+    $updates = Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -IgnoreReboot -Confirm:$false -Verbose 4>&1
+    if ($updates) {
+        foreach ($u in $updates) {
+            if ($u -is [System.Management.Automation.VerboseRecord]) {
+                Write-Output ("verbose: " + $u.Message)
+            } elseif ($u.Title) {
+                $st = if ($u.Result) { $u.Result } else { 'queued' }
+                Write-Output ("[{0}] {1}" -f $st, $u.Title)
+            } else {
+                Write-Output ([string]$u)
+            }
+        }
+    } else {
+        Write-Output "No updates available."
+    }
+    exit 0
+} catch {
+    Write-Error $_.Exception.Message
+    exit 1
+}
+'@
+
 function Write-Log {
     param([string]$Message, [string]$Level = 'INFO')
     $stamp = Get-Date -Format 'HH:mm:ss'
@@ -1349,23 +1382,61 @@ function Invoke-WindowsUpdates {
     Write-UiLog "Preparing Windows Update..."
     Set-UiStatus "Checking for Windows updates..."
     try {
+        # Module setup is host-agnostic so it runs fine in the runspace.
         if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge [version]'2.8.5.201' })) {
             Write-UiLog "Installing NuGet package provider..."
             Install-PackageProvider -Name NuGet -Force -Scope CurrentUser -ErrorAction Stop | Out-Null
         }
         if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
             Write-UiLog "Installing PSWindowsUpdate module..."
+            # Trust PSGallery up-front so the subprocess doesn't hit a confirm prompt of its own.
+            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
             Install-Module -Name PSWindowsUpdate -Force -Scope CurrentUser -AllowClobber -ErrorAction Stop
         }
-        Import-Module PSWindowsUpdate -ErrorAction Stop
-        Write-UiLog "Scanning for updates (including optional)..."
-        Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -IgnoreReboot -ErrorAction Stop |
-            ForEach-Object {
-                $st = if ($_.Result) { $_.Result } else { 'queued' }
-                Write-UiLog "Update: $($_.Title) [$st]"
+
+        # PSWindowsUpdate's Get-WindowsUpdate -Install fails in this background runspace
+        # with "the host program... does not support user interaction" because the cmdlet
+        # uses Read-Host internally even when -Confirm:$false and -AcceptAll are set.
+        # Workaround: run it in a fresh powershell.exe, which provides a real console host.
+        $stem = "pbt_winupdate_" + [Guid]::NewGuid().ToString('N').Substring(0,8)
+        $tempScript = Join-Path $env:TEMP "$stem.ps1"
+        $stdoutLog  = Join-Path $env:TEMP "$stem.out.log"
+        $stderrLog  = Join-Path $env:TEMP "$stem.err.log"
+
+        # Single-quoted here-string lives at top level (in $sync.WinUpdateScript) because
+        # nested here-strings would break the outer $pipelineCode here-string at parse time.
+        Set-Content -Path $tempScript -Value $sync.WinUpdateScript -Encoding UTF8
+
+        Write-UiLog "Running Windows Update via powershell.exe subprocess (this can take 10+ minutes)..."
+        Set-UiStatus "Installing Windows updates..."
+        $p = Start-Process -FilePath powershell.exe `
+            -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$tempScript`"") `
+            -Wait -PassThru -NoNewWindow `
+            -RedirectStandardOutput $stdoutLog `
+            -RedirectStandardError $stderrLog
+
+        # Stream subprocess stdout into the UI log line-by-line
+        if (Test-Path $stdoutLog) {
+            Get-Content $stdoutLog -ErrorAction SilentlyContinue | ForEach-Object {
+                $line = $_.Trim()
+                if ($line) { Write-UiLog "WU: $line" }
             }
-        Write-UiLog "Windows Update run complete. Some updates may need a reboot." 'OK'
-        Add-Result 'Windows Update' 'install' 'OK'
+        }
+        if (Test-Path $stderrLog) {
+            $errText = Get-Content $stderrLog -Raw -ErrorAction SilentlyContinue
+            if ($errText -and $errText.Trim()) {
+                Write-UiLog ("WU stderr: " + ($errText.Trim() -replace "`r?`n", ' | ')) 'WARN'
+            }
+        }
+        Remove-Item $tempScript, $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
+
+        if ($p.ExitCode -eq 0) {
+            Write-UiLog "Windows Update run complete. Some updates may need a reboot." 'OK'
+            Add-Result 'Windows Update' 'install' 'OK'
+        } else {
+            Write-UiLog "Windows Update subprocess exited with code $($p.ExitCode)." 'WARN'
+            Add-Result 'Windows Update' 'install' 'WARN' "exit $($p.ExitCode)"
+        }
     } catch {
         Write-UiLog "Windows Update failed: $_" 'ERROR'
         Add-Result 'Windows Update' 'install' 'FAIL' "$_"
@@ -1393,6 +1464,20 @@ function Get-AdrenalinDownloadUrl {
     return $null
 }
 
+# The NVIDIA App is not available in winget (manifest validation blocked since 2024
+# due to the hardware requirement check). Scrape the official download page instead.
+# URL pattern: https://us.download.nvidia.com/nvapp/client/<ver>/NVIDIA_app_v<ver>.exe
+function Get-NvidiaAppDownloadUrl {
+    $page = 'https://www.nvidia.com/en-us/software/nvidia-app/'
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
+        $html = (Invoke-WebRequest -UseBasicParsing -Uri $page -TimeoutSec 30 -UserAgent 'Mozilla/5.0').Content
+        $matches = [regex]::Matches($html, 'https://[^"'']*?NVIDIA_app[^"'']*?\.exe', 'IgnoreCase')
+        if ($matches.Count -gt 0) { return $matches[0].Value }
+    } catch { Write-UiLog "NVIDIA App page scrape failed: $_" 'WARN' }
+    return $null
+}
+
 function Install-GpuDriver {
     $vendor = Get-GpuVendor
     if (-not $vendor) {
@@ -1402,7 +1487,17 @@ function Install-GpuDriver {
     }
     Write-UiLog "Detected GPU vendor: $vendor"
     if ($vendor -eq 'NVIDIA') {
-        Invoke-WingetInstall -App @{ Id='Nvidia.NVIDIAApp'; Name='NVIDIA App' }
+        Write-UiLog "Locating current NVIDIA App installer from nvidia.com..."
+        $url = Get-NvidiaAppDownloadUrl
+        if (-not $url) {
+            Write-UiLog "Could not find NVIDIA App download URL. Install manually from https://www.nvidia.com/en-us/software/nvidia-app/" 'ERROR'
+            Add-Result 'NVIDIA App' 'install' 'FAIL' 'scrape failed'
+            return
+        }
+        Write-UiLog "NVIDIA App URL: $url"
+        # NVIDIA App installer accepts -s for silent install (NVIDIA convention,
+        # same as their driver setup). The alternative /S (NSIS) is not honoured.
+        Invoke-DirectInstall -App @{ Name='NVIDIA App'; DownloadUrl=$url; SilentArgs='-s' }
     }
     elseif ($vendor -eq 'AMD') {
         Write-UiLog "Locating current Adrenalin installer from amd.com..."
@@ -1437,24 +1532,117 @@ function Invoke-TweakEmptyRecycle {
     catch { Write-UiLog "Recycle Bin: $_" 'WARN' }
 }
 function Invoke-TweakClearBrowser {
-    Write-UiLog "Clearing browser history (close browsers first)..."
-    $t = @(
-        @{ N='Edge';   P="$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\History" }
-        @{ N='Chrome'; P="$env:LOCALAPPDATA\Google\Chrome\User Data\Default\History"  }
-    )
-    foreach ($i in $t) {
-        if (Test-Path $i.P) {
-            try { Remove-Item $i.P -Force -EA Stop; Write-UiLog "Cleared $($i.N)." 'OK' }
-            catch { Write-UiLog "$($i.N) locked." 'WARN' }
+    Write-UiLog "Clearing browser data (closing browsers first)..."
+
+    # --- Step 1: terminate browser processes so their files unlock ---
+    # 'msedge' covers Edge main + content processes; same for 'chrome', 'firefox', etc.
+    $browsers = @('msedge','chrome','firefox','brave','opera','vivaldi','iexplore')
+    $closed = @()
+    foreach ($name in $browsers) {
+        $procs = Get-Process -Name $name -ErrorAction SilentlyContinue
+        if ($procs) {
+            $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+            $closed += $name
         }
     }
-    $ff = Join-Path $env:APPDATA 'Mozilla\Firefox\Profiles'
-    if (Test-Path $ff) {
-        Get-ChildItem $ff -Directory | ForEach-Object {
-            $p = Join-Path $_.FullName 'places.sqlite'
-            if (Test-Path $p) {
-                try { Remove-Item $p -Force -EA Stop; Write-UiLog "Cleared Firefox ($($_.Name))." 'OK' }
-                catch { Write-UiLog "Firefox profile $($_.Name) locked." 'WARN' }
+    if ($closed.Count -gt 0) {
+        Write-UiLog "Closed: $($closed -join ', ')"
+        # File handles linger briefly after Stop-Process; let the kernel release them.
+        Start-Sleep -Milliseconds 1500
+        # Re-check for stragglers (Chromium browsers can respawn watcher processes).
+        foreach ($name in $closed) {
+            $procs = Get-Process -Name $name -ErrorAction SilentlyContinue
+            if ($procs) { $procs | Stop-Process -Force -ErrorAction SilentlyContinue }
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    # Helper: delete a file or folder, return $true on success or if it didn't exist.
+    $remove = {
+        param([string]$Path)
+        if (-not (Test-Path -LiteralPath $Path)) { return $true }
+        try { Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop; return $true }
+        catch { return $false }
+    }
+
+    # --- Step 2: Chromium-based browsers (Edge, Chrome, Brave) ---
+    # Per-profile data to remove. Deliberately KEEPS:
+    #   - "Login Data" / "Login Data For Account"  (saved passwords)
+    #   - "Web Data" (autofill, payment methods)
+    #   - "Bookmarks"
+    #   - "Preferences" / "Secure Preferences" (settings)
+    #   - "Extensions" folder
+    $chromiumNuke = @(
+        'History','History-journal','History Provider Cache',
+        'Cookies','Cookies-journal',
+        'Network\Cookies','Network\Cookies-journal',
+        'Top Sites','Top Sites-journal','Visited Links',
+        'Favicons','Favicons-journal',
+        'Sessions','Session Storage','Local Storage','IndexedDB',
+        'Cache','Code Cache','GPUCache','Service Worker',
+        'Current Session','Current Tabs','Last Session','Last Tabs',
+        'Media History','Media History-journal',
+        'Shortcuts','Shortcuts-journal',
+        'QuotaManager','QuotaManager-journal',
+        'DawnGraphiteCache','DawnWebGPUCache'
+    )
+    $chromiumRoots = @(
+        @{ N='Edge';   Root="$env:LOCALAPPDATA\Microsoft\Edge\User Data" }
+        @{ N='Chrome'; Root="$env:LOCALAPPDATA\Google\Chrome\User Data" }
+        @{ N='Brave';  Root="$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data" }
+    )
+    foreach ($b in $chromiumRoots) {
+        if (-not (Test-Path -LiteralPath $b.Root)) { continue }
+        $profileDirs = Get-ChildItem -LiteralPath $b.Root -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -eq 'Default' -or $_.Name -like 'Profile *' }
+        if (-not $profileDirs) { continue }
+        $ok = 0; $fail = 0
+        foreach ($prof in $profileDirs) {
+            foreach ($rel in $chromiumNuke) {
+                $target = Join-Path $prof.FullName $rel
+                if (-not (Test-Path -LiteralPath $target)) { continue }
+                if (& $remove $target) { $ok++ } else { $fail++ }
+            }
+        }
+        if ($fail -gt 0) {
+            Write-UiLog "$($b.N): cleared $ok item(s) across $($profileDirs.Count) profile(s); $fail still locked." 'WARN'
+        } else {
+            Write-UiLog "$($b.N): cleared $ok item(s) across $($profileDirs.Count) profile(s)." 'OK'
+        }
+    }
+
+    # --- Step 3: Firefox ---
+    # NOTE: places.sqlite contains BOTH history and bookmarks; clearing it loses both.
+    # This matches the prior behaviour and the user's "clear all" intent.
+    # KEEPS: logins.json, key4.db (saved passwords), prefs.js, extensions/.
+    $firefoxNukeRoaming = @(
+        'places.sqlite','places.sqlite-wal','places.sqlite-shm',
+        'cookies.sqlite','cookies.sqlite-wal','cookies.sqlite-shm',
+        'formhistory.sqlite',
+        'permissions.sqlite','permissions.sqlite-wal','permissions.sqlite-shm',
+        'webappsstore.sqlite','webappsstore.sqlite-wal','webappsstore.sqlite-shm',
+        'sessionstore.jsonlz4','sessionstore.bak','sessionstore-backups',
+        'storage','storage-sync-v2.sqlite','favicons.sqlite','favicons.sqlite-wal'
+    )
+    $firefoxNukeLocal = @('cache2','startupCache','thumbnails','OfflineCache','jumpListCache','shader-cache')
+
+    $ffPaths = @(
+        @{ Root = Join-Path $env:APPDATA      'Mozilla\Firefox\Profiles'; List = $firefoxNukeRoaming }
+        @{ Root = Join-Path $env:LOCALAPPDATA 'Mozilla\Firefox\Profiles'; List = $firefoxNukeLocal   }
+    )
+    foreach ($pair in $ffPaths) {
+        if (-not (Test-Path -LiteralPath $pair.Root)) { continue }
+        Get-ChildItem -LiteralPath $pair.Root -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            $prof = $_
+            $ok = 0; $fail = 0
+            foreach ($rel in $pair.List) {
+                $target = Join-Path $prof.FullName $rel
+                if (-not (Test-Path -LiteralPath $target)) { continue }
+                if (& $remove $target) { $ok++ } else { $fail++ }
+            }
+            if ($ok -gt 0 -or $fail -gt 0) {
+                if ($fail -gt 0) { Write-UiLog "Firefox '$($prof.Name)': cleared $ok, $fail locked." 'WARN' }
+                else             { Write-UiLog "Firefox '$($prof.Name)': cleared $ok item(s)." 'OK' }
             }
         }
     }
