@@ -81,129 +81,730 @@ $script:BloatList = @(
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="PC Build Toolkit" Height="820" Width="960"
-        WindowStartupLocation="CenterScreen" Background="#0F1115">
+        Title="PC Build Toolkit" Height="860" Width="1180"
+        WindowStartupLocation="CenterScreen" Background="#12151B"
+        FontFamily="Segoe UI" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
     <Window.Resources>
-        <Style TargetType="CheckBox">
-            <Setter Property="Foreground" Value="#E6E8EB"/>
-            <Setter Property="Margin" Value="0,4"/>
+
+        <!-- ================= Palette ================= -->
+        <SolidColorBrush x:Key="BgApp"     Color="#12151B"/>
+        <SolidColorBrush x:Key="BgDeep"    Color="#0D1015"/>
+        <SolidColorBrush x:Key="BgPanel"   Color="#1A1E26"/>
+        <SolidColorBrush x:Key="BgPanel2"  Color="#20252F"/>
+        <SolidColorBrush x:Key="BgHover"   Color="#232832"/>
+        <SolidColorBrush x:Key="Line"      Color="#2A2F3A"/>
+        <SolidColorBrush x:Key="LineSoft"  Color="#23283132"/>
+        <SolidColorBrush x:Key="TextHi"    Color="#F1F3F6"/>
+        <SolidColorBrush x:Key="TextMid"   Color="#C4C9D2"/>
+        <SolidColorBrush x:Key="TextMuted" Color="#8891A0"/>
+        <SolidColorBrush x:Key="TextDim"   Color="#5D6572"/>
+        <SolidColorBrush x:Key="Accent"    Color="#4FA3FF"/>
+        <SolidColorBrush x:Key="AccentSoft" Color="#264063"/>
+        <SolidColorBrush x:Key="Lime"      Color="#8AE06B"/>
+        <SolidColorBrush x:Key="Amber"     Color="#E0B15B"/>
+        <SolidColorBrush x:Key="Rose"      Color="#E07A6B"/>
+        <FontFamily x:Key="Mono">Cascadia Mono, Consolas, Courier New</FontFamily>
+
+        <!-- ================= Global typography ================= -->
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextHi}"/>
             <Setter Property="FontSize" Value="13"/>
         </Style>
-        <Style TargetType="TextBlock"><Setter Property="Foreground" Value="#E6E8EB"/></Style>
+
+        <!-- ================= Title bar button ================= -->
+        <Style x:Key="TitleBarBtn" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMid}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Width" Value="44"/>
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="B" Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="#262B36"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="TitleBarBtnClose" TargetType="Button" BasedOn="{StaticResource TitleBarBtn}">
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#C42B1C"/>
+                    <Setter Property="Foreground" Value="White"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- ================= Sidebar nav item ================= -->
+        <Style x:Key="NavItem" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{StaticResource TextMid}"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="Margin" Value="0,1"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Tag" Value=""/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid>
+                            <Border x:Name="B" Background="Transparent" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Rectangle x:Name="Tick" Width="2" Height="16" Fill="Transparent" RadiusX="1" RadiusY="1" Margin="-4,0,8,0" VerticalAlignment="Center"/>
+                                    <Viewbox Width="14" Height="14" Margin="0,0,10,0" VerticalAlignment="Center">
+                                        <Path x:Name="Ico" Data="{TemplateBinding Tag}"
+                                              Stroke="{TemplateBinding Foreground}" StrokeThickness="1.4"
+                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                              Fill="Transparent" Width="16" Height="16"/>
+                                    </Viewbox>
+                                    <ContentPresenter VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="{StaticResource BgHover}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextHi}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="{StaticResource BgPanel}"/>
+                                <Setter TargetName="Tick" Property="Fill" Value="{StaticResource Accent}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextHi}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ================= Checkbox (custom square) ================= -->
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource TextMid}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Border x:Name="Row" Background="Transparent" CornerRadius="6" Padding="10,9">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border x:Name="Box" Grid.Column="0" Width="16" Height="16" CornerRadius="4"
+                                        Background="Transparent" BorderBrush="{StaticResource Line}" BorderThickness="1.4"
+                                        VerticalAlignment="Center" Margin="0,0,12,0">
+                                    <Path x:Name="Tick" Data="M 2.5 8 L 6 11 L 13 4" Stroke="#0F1115" StrokeThickness="2"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                          Stretch="None" Visibility="Collapsed"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <ContentPresenter Grid.Column="1" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Row" Property="Background" Value="{StaticResource BgHover}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextHi}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Box" Property="Background" Value="{StaticResource Accent}"/>
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                <Setter TargetName="Tick" Property="Visibility" Value="Visible"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextHi}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ================= Toggle switch (CheckBox retemplated, two-line label + sliding thumb) ================= -->
+        <Style x:Key="ToggleSwitch" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource TextHi}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Tag" Value=""/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Border x:Name="Row" Background="Transparent" CornerRadius="6" Padding="10,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}" FontSize="13" FontWeight="Medium"/>
+                                    <TextBlock Text="{TemplateBinding Tag}" Foreground="{StaticResource TextMuted}" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <Border x:Name="Track" Grid.Column="1" Width="34" Height="19" CornerRadius="10"
+                                        BorderThickness="1"
+                                        VerticalAlignment="Center" Margin="14,0,0,0">
+                                    <Border.Background>
+                                        <SolidColorBrush Color="#1A1F2A"/>
+                                    </Border.Background>
+                                    <Border.BorderBrush>
+                                        <SolidColorBrush Color="#2A3140"/>
+                                    </Border.BorderBrush>
+                                    <Grid>
+                                        <Ellipse x:Name="Thumb" Width="13" Height="13"
+                                                 HorizontalAlignment="Left" VerticalAlignment="Center" Margin="2,0,0,0">
+                                            <Ellipse.Fill>
+                                                <SolidColorBrush Color="#7D8795"/>
+                                            </Ellipse.Fill>
+                                        </Ellipse>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Row" Property="Background" Value="{StaticResource BgHover}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="#4FA3FF"/>
+                                <Setter TargetName="Track" Property="BorderBrush" Value="#4FA3FF"/>
+                                <Setter TargetName="Thumb" Property="Fill" Value="#0B1320"/>
+                                <Setter TargetName="Thumb" Property="Margin" Value="17,0,0,0"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ================= Chip button (category filter / toggle-all) ================= -->
+        <Style x:Key="ChipBtn" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="FontFamily" Value="{StaticResource Mono}"/>
+            <Setter Property="FontSize" Value="10.5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Margin" Value="0,0,5,5"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="B" CornerRadius="2"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="#1A1F2A"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextHi}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ================= Footer buttons ================= -->
+        <Style x:Key="BtnGhost" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMid}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="B" CornerRadius="6" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="{StaticResource BgPanel}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextHi}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="BtnDanger" TargetType="Button" BasedOn="{StaticResource BtnGhost}">
+            <Setter Property="Foreground" Value="#E07A6B"/>
+            <Setter Property="BorderBrush" Value="#5A2A26"/>
+        </Style>
+        <Style x:Key="BtnPrimary" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource Accent}"/>
+            <Setter Property="Foreground" Value="#0B1320"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="18,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="B" CornerRadius="6" Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="#6DB4FF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="B" Property="Background" Value="#2A3748"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ================= Progress bar (flat, thin) ================= -->
+        <Style TargetType="ProgressBar">
+            <Setter Property="Height" Value="4"/>
+            <Setter Property="Background" Value="{StaticResource BgPanel}"/>
+            <Setter Property="Foreground" Value="{StaticResource Accent}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ProgressBar">
+                        <Border CornerRadius="999" Background="{TemplateBinding Background}" ClipToBounds="True">
+                            <Grid>
+                                <Rectangle x:Name="PART_Track"/>
+                                <Border x:Name="PART_Indicator" HorizontalAlignment="Left"
+                                        Background="{TemplateBinding Foreground}" CornerRadius="999"/>
+                            </Grid>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ================= ScrollBar (thin, dark) ================= -->
+        <Style x:Key="ScrollThumb" TargetType="Thumb">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="IsTabStop" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border Background="#2A3140" CornerRadius="3" Margin="2,2,2,2"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="ScrollPageBtn" TargetType="RepeatButton">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="IsTabStop" Value="False"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <Rectangle Fill="Transparent"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ScrollBar">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Width" Value="10"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Background="{TemplateBinding Background}">
+                            <Track Name="PART_Track" IsDirectionReversed="True" Focusable="False">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageUpCommand" Style="{StaticResource ScrollPageBtn}"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageDownCommand" Style="{StaticResource ScrollPageBtn}"/>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource ScrollThumb}"/>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
     </Window.Resources>
-    <Grid Margin="18">
+
+    <!-- ============ Frameless root ============ -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="36" CornerRadius="0" GlassFrameThickness="0" ResizeBorderThickness="6" UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+
+    <Border Background="{StaticResource BgApp}" BorderBrush="#2A2F3A" BorderThickness="1">
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="210"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="36"/>       <!-- title bar -->
+            <RowDefinition Height="*"/>        <!-- body -->
         </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0" Margin="0,0,0,14">
+        <!-- ============ Title bar ============ -->
+        <Grid Grid.Row="0" Background="#0F1218">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0">
-                <TextBlock Text="PC BUILD TOOLKIT" FontSize="22" FontWeight="Bold"/>
-                <TextBlock Text="Build validation deployer" Foreground="#7F8793" FontSize="12"/>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
+                <Border Width="14" Height="14" CornerRadius="3" Margin="0,0,10,0">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                            <GradientStop Color="#4FA3FF" Offset="0"/>
+                            <GradientStop Color="#8A6DFF" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Border.Background>
+                </Border>
+                <TextBlock Foreground="{StaticResource TextMid}" FontSize="12" VerticalAlignment="Center">
+                    <Run FontWeight="SemiBold" Foreground="#F1F3F6" Text="PC Build Toolkit"/>
+                    <Run Text="  |  "/><Run x:Name="VersionLabel" Text="v1.1.0"/>
+                    <Run Text="  |  Administrator"/>
+                </TextBlock>
             </StackPanel>
-            <TextBlock Grid.Column="1" Name="VersionLabel" Text="" Foreground="#7F8793"
-                       FontSize="11" VerticalAlignment="Bottom"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" WindowChrome.IsHitTestVisibleInChrome="True">
+                <Button x:Name="BtnMin"   Style="{StaticResource TitleBarBtn}"       Content="&#xE921;"/>
+                <Button x:Name="BtnMax"   Style="{StaticResource TitleBarBtn}"       Content="&#xE922;"/>
+                <Button x:Name="BtnClose" Style="{StaticResource TitleBarBtnClose}"  Content="&#xE8BB;"/>
+            </StackPanel>
         </Grid>
 
+        <!-- ============ Body: sidebar + main ============ -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="220"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" Background="#1A1D24" CornerRadius="6" Padding="18" Margin="0,0,7,0">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel>
-                        <TextBlock Text="APPLICATIONS" Foreground="#7F8793" FontSize="11" FontWeight="Bold" Margin="0,0,0,10"/>
-                        <StackPanel Name="AppPanel"/>
-                        <Separator Margin="0,12,0,8" Background="#2A2F38"/>
-                        <Button Name="BtnSelectAllApps" Content="Toggle all" Height="26"
-                                Background="Transparent" Foreground="#7F8793" BorderThickness="0"
-                                HorizontalAlignment="Left" Cursor="Hand"/>
-                        <Separator Margin="0,14,0,10" Background="#2A2F38"/>
-                        <TextBlock Text="DRIVERS &amp; UPDATES" Foreground="#7F8793" FontSize="11" FontWeight="Bold" Margin="0,0,0,6"/>
-                        <CheckBox Name="OptGpuDriver"      Content="Install GPU driver (auto-detect AMD/NVIDIA)"/>
-                        <CheckBox Name="OptWindowsUpdate"  Content="Install all Windows updates (including optional)"/>
+            <!-- Sidebar -->
+            <Border Grid.Column="0" Background="{StaticResource BgDeep}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,1,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Brand -->
+                    <StackPanel Grid.Row="0" Margin="18,20,18,16">
+                        <StackPanel Orientation="Horizontal">
+                            <Border Width="28" Height="28" CornerRadius="6" Margin="0,0,10,0">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#4FA3FF" Offset="0"/>
+                                        <GradientStop Color="#8A6DFF" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="Build Toolkit" FontWeight="SemiBold" FontSize="13"/>
+                                <TextBlock Text="fay-digital / pbt" FontFamily="{StaticResource Mono}" FontSize="10" Foreground="{StaticResource TextMuted}"/>
+                            </StackPanel>
+                        </StackPanel>
                     </StackPanel>
-                </ScrollViewer>
+
+                    <Rectangle Grid.Row="0" Fill="{StaticResource Line}" Height="1" VerticalAlignment="Bottom" Margin="12,0"/>
+
+                    <!-- Nav -->
+                    <StackPanel Grid.Row="1" Margin="10,12,10,0">
+                        <TextBlock Text="WORKSPACE" Foreground="{StaticResource TextDim}" FontFamily="{StaticResource Mono}" FontSize="10" Margin="10,4,0,6"/>
+                        <RadioButton x:Name="NavDeploy"  Style="{StaticResource NavItem}" IsChecked="True" GroupName="Nav" Content="Deploy"
+                            Tag="M4,3 L13,3 L13,13 L4,13 Z M4,6 L13,6 M7,9 L10,9"/>
+                        <RadioButton x:Name="NavTweaks"  Style="{StaticResource NavItem}" GroupName="Nav" Content="System tweaks"
+                            Tag="M8,6 A2,2 0 1 1 7.99,6 M8,1.5 L8,3.5 M8,12.5 L8,14.5 M14.5,8 L12.5,8 M3.5,8 L1.5,8 M12.6,3.4 L11.2,4.8 M4.8,11.2 L3.4,12.6 M12.6,12.6 L11.2,11.2 M4.8,4.8 L3.4,3.4"/>
+                        <RadioButton x:Name="NavDrivers" Style="{StaticResource NavItem}" GroupName="Nav" Content="Drivers &amp; updates"
+                            Tag="M8,2 L8,10 M5,7 L8,10 L11,7 M3,13 L13,13"/>
+                        <RadioButton x:Name="NavLogs"    Style="{StaticResource NavItem}" GroupName="Nav" Content="Logs"
+                            Tag="M3,4 L13,4 M3,8 L13,8 M3,12 L13,12"/>
+
+                        <TextBlock Text="MACHINE" Foreground="{StaticResource TextDim}" FontFamily="{StaticResource Mono}" FontSize="10" Margin="10,18,0,6"/>
+                        <Grid Margin="10,3">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Path Grid.Column="0" Data="M3.5,3.5 L12.5,3.5 L12.5,12.5 L3.5,12.5 Z M6,6 L10,6 L10,10 L6,10 Z M6,1 L6,3 M10,1 L10,3 M6,13 L6,15 M10,13 L10,15 M1,6 L3,6 M1,10 L3,10 M13,6 L15,6 M13,10 L15,10"
+                                  Stroke="{StaticResource TextMuted}" StrokeThickness="1.3" Fill="Transparent" Width="14" Height="14" Stretch="Uniform" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                            <TextBlock Grid.Column="1" x:Name="SysCpu" Foreground="{StaticResource TextMid}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        </Grid>
+                        <Grid Margin="10,3">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Path Grid.Column="0" Data="M1.5,5 L14.5,5 L14.5,12 L1.5,12 Z M5,8.5 A1.6,1.6 0 1 1 4.99,8.5 M11,8.5 A1.6,1.6 0 1 1 10.99,8.5"
+                                  Stroke="{StaticResource TextMuted}" StrokeThickness="1.3" Fill="Transparent" Width="14" Height="14" Stretch="Uniform" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                            <TextBlock Grid.Column="1" x:Name="SysGpu" Foreground="{StaticResource TextMid}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        </Grid>
+                        <Grid Margin="10,3">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Path Grid.Column="0" Data="M1.5,4.5 L14.5,4.5 L14.5,10.5 L1.5,10.5 Z M4,4.5 L4,10.5 M7,4.5 L7,10.5 M10,4.5 L10,10.5 M13,4.5 L13,10.5"
+                                  Stroke="{StaticResource TextMuted}" StrokeThickness="1.3" Fill="Transparent" Width="14" Height="14" Stretch="Uniform" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                            <TextBlock Grid.Column="1" x:Name="SysRam" Foreground="{StaticResource TextMid}" FontSize="12" VerticalAlignment="Center"/>
+                        </Grid>
+                        <Grid Margin="10,3">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Path Grid.Column="0" Data="M2,3 L14,3 L14,13 L2,13 Z M5,10 A0.8,0.8 0 1 1 4.99,10 M7.5,10 A0.8,0.8 0 1 1 7.49,10"
+                                  Stroke="{StaticResource TextMuted}" StrokeThickness="1.3" Fill="Transparent" Width="14" Height="14" Stretch="Uniform" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                            <TextBlock Grid.Column="1" x:Name="SysDisk" Foreground="{StaticResource TextMid}" FontSize="12" VerticalAlignment="Center"/>
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- Foot -->
+                    <StackPanel Grid.Row="2" Margin="18,12,18,16">
+                        <Rectangle Fill="{StaticResource Line}" Height="1" Margin="0,0,0,10"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,3">
+                            <Ellipse Width="6" Height="6" Fill="{StaticResource Lime}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock x:Name="StatusWinget" Text="winget  healthy" Foreground="{StaticResource TextMuted}" FontFamily="{StaticResource Mono}" FontSize="10.5"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,3">
+                            <Ellipse Width="6" Height="6" Fill="{StaticResource Lime}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock x:Name="StatusDisk" Text="disk  -- GB free" Foreground="{StaticResource TextMuted}" FontFamily="{StaticResource Mono}" FontSize="10.5"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
             </Border>
 
-            <Border Grid.Column="1" Background="#1A1D24" CornerRadius="6" Padding="18" Margin="7,0,0,0">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <!-- Main -->
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Head -->
+                <Border Grid.Row="0" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="22,16">
                     <StackPanel>
-                        <TextBlock Text="SYSTEM TWEAKS" Foreground="#7F8793" FontSize="11" FontWeight="Bold" Margin="0,0,0,10"/>
-                        <CheckBox Name="TweakPowerNever"       Content="Set power plan: display/sleep/hibernate -> never"/>
-                        <CheckBox Name="TweakDisableHibernate" Content="Disable hibernation (powercfg -h off)"/>
-                        <CheckBox Name="TweakClearDownloads"   Content="Clear Downloads folder"/>
-                        <CheckBox Name="TweakEmptyRecycle"     Content="Empty Recycle Bin"/>
-                        <CheckBox Name="TweakClearBrowser"     Content="Clear browser history (Edge, Chrome, Firefox)"/>
-                        <CheckBox Name="TweakStartGrid"        Content="Start menu: grid layout (Win11)"/>
-                        <CheckBox Name="TweakRemoveBloat"      Content="Remove Windows bloat (per-user)"/>
-                        <Separator Margin="0,14,0,10" Background="#2A2F38"/>
-                        <TextBlock Text="REPORT" Foreground="#7F8793" FontSize="11" FontWeight="Bold" Margin="0,0,0,6"/>
-                        <CheckBox Name="OptBenchReport" Content="Generate bench report on Desktop after run" IsChecked="True"/>
-                        <Separator Margin="0,14,0,10" Background="#2A2F38"/>
-                        <TextBlock Text="DEBUG" Foreground="#7F8793" FontSize="11" FontWeight="Bold" Margin="0,0,0,6"/>
-                        <CheckBox Name="OptKeepTemp" Content="Keep downloaded/extracted files for debugging"/>
+                        <TextBlock Text="Deploy new bench run" FontSize="17" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="HeadSub" FontFamily="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource TextMuted}" Margin="0,3,0,0"/>
                     </StackPanel>
-                </ScrollViewer>
-            </Border>
+                </Border>
+
+                <!-- Content: two cards side by side + console below -->
+                <Grid Grid.Row="1" Margin="22,14,22,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="220"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Applications card -->
+                    <Border Grid.Column="0" Grid.Row="0" Background="{StaticResource BgPanel}" CornerRadius="8"
+                            BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="16,14" Margin="0,0,7,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- Card head -->
+                            <Grid Grid.Row="0" Margin="4,0,4,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="APPLICATIONS" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextMid}"/>
+                                <TextBlock Grid.Column="1" x:Name="AppCount" Text="" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextMuted}"/>
+                            </Grid>
+
+                            <!-- Chip filters -->
+                            <WrapPanel Grid.Row="1" Margin="4,0,4,6">
+                                <Button x:Name="ChipAll"      Style="{StaticResource ChipBtn}" Content="All"/>
+                                <Button x:Name="ChipDiag"     Style="{StaticResource ChipBtn}" Content="Diagnostics"/>
+                                <Button x:Name="ChipBench"    Style="{StaticResource ChipBtn}" Content="Benchmark"/>
+                                <Button x:Name="ChipGpu"      Style="{StaticResource ChipBtn}" Content="GPU stress"/>
+                                <Button x:Name="ChipStab"     Style="{StaticResource ChipBtn}" Content="Stability"/>
+                                <Button x:Name="ChipInfo"     Style="{StaticResource ChipBtn}" Content="Info"/>
+                                <Button x:Name="ChipCpu"      Style="{StaticResource ChipBtn}" Content="CPU torture"/>
+                            </WrapPanel>
+
+                            <!-- App list -->
+                            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0">
+                                <StackPanel x:Name="AppPanel"/>
+                            </ScrollViewer>
+
+                            <!-- Toggle all -->
+                            <Button Grid.Row="3" x:Name="BtnSelectAllApps" Style="{StaticResource ChipBtn}" Content="Toggle all" Margin="4,10,0,0" HorizontalAlignment="Left"/>
+
+                            <!-- Drivers -->
+                            <StackPanel Grid.Row="4" Margin="0,12,0,0">
+                                <TextBlock Text="DRIVERS &amp; UPDATES" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextDim}" Margin="4,4,0,4"/>
+                                <CheckBox x:Name="OptGpuDriver"     Content="Auto-detect &amp; install GPU driver (AMD / NVIDIA)"/>
+                                <CheckBox x:Name="OptWindowsUpdate" Content="Install all Windows updates (incl. optional)"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- System tweaks card -->
+                    <Border Grid.Column="1" Grid.Row="0" Background="{StaticResource BgPanel}" CornerRadius="8"
+                            BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="16,14" Margin="7,0,0,0">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <Grid Margin="4,0,4,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="SYSTEM TWEAKS" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextMid}"/>
+                                    <TextBlock Grid.Column="1" x:Name="TweakCount" Text="" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextMuted}"/>
+                                </Grid>
+
+                                <CheckBox x:Name="TweakPowerNever"       Style="{StaticResource ToggleSwitch}" Content="Power plan &#8594; never"                Tag="Display, sleep and hibernate timeouts set to never"/>
+                                <CheckBox x:Name="TweakDisableHibernate" Style="{StaticResource ToggleSwitch}" Content="Disable hibernation"                   Tag="powercfg -h off (frees hiberfil.sys from system drive)"/>
+                                <CheckBox x:Name="TweakClearDownloads"   Style="{StaticResource ToggleSwitch}" Content="Clear Downloads folder"                Tag="Destructive. Wipes %USERPROFILE%\Downloads recursively"/>
+                                <CheckBox x:Name="TweakEmptyRecycle"     Style="{StaticResource ToggleSwitch}" Content="Empty Recycle Bin"                     Tag="All drives"/>
+                                <CheckBox x:Name="TweakClearBrowser"     Style="{StaticResource ToggleSwitch}" Content="Clear browser history"                 Tag="Edge, Chrome, Firefox &#8212; close browsers first"/>
+                                <CheckBox x:Name="TweakStartGrid"        Style="{StaticResource ToggleSwitch}" Content="Start menu grid layout"                Tag="Windows 11 &#8212; requires sign out / in"/>
+                                <CheckBox x:Name="TweakRemoveBloat"      Style="{StaticResource ToggleSwitch}" Content="Remove Windows bloat"                  Tag="17 AppX packages + Quick Assist (per-user)"/>
+
+                                <TextBlock Text="OUTPUT" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextDim}" Margin="4,14,0,4"/>
+                                <CheckBox x:Name="OptBenchReport" Style="{StaticResource ToggleSwitch}" Content="Generate bench report" Tag="Writes summary .txt to Desktop after run" IsChecked="True"/>
+                                <CheckBox x:Name="OptKeepTemp"    Style="{StaticResource ToggleSwitch}" Content="Keep temp files"      Tag="Retains downloads and extracted archives for debug"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+
+                    <!-- Console (spans both columns) -->
+                    <Border Grid.Row="1" Grid.ColumnSpan="2" Background="#0B0E14" CornerRadius="8"
+                            BorderBrush="{StaticResource Line}" BorderThickness="1" Margin="0,14,0,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0" Background="#10141C" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="14,10">
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse Width="8" Height="8" Fill="#E07A6B" Margin="0,0,5,0"/>
+                                    <Ellipse Width="8" Height="8" Fill="#E0B15B" Margin="0,0,5,0"/>
+                                    <Ellipse Width="8" Height="8" Fill="#8AE06B" Margin="0,0,14,0"/>
+                                    <TextBlock Text="LOG" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextHi}" VerticalAlignment="Center"/>
+                                    <TextBlock Text="   streaming to %TEMP%\pcbt.log" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Border>
+                            <ScrollViewer x:Name="LogScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="14,10">
+                                <TextBlock x:Name="LogOutput" FontFamily="{StaticResource Mono}" FontSize="11.5"
+                                           Foreground="{StaticResource TextMid}" TextWrapping="Wrap" LineHeight="18"/>
+                            </ScrollViewer>
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <!-- Footer -->
+                <Border Grid.Row="2" Background="#0F1218" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="22,14">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="StatusText" Text="Ready." Foreground="{StaticResource TextHi}" FontSize="13" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="ProgressPct" Grid.Column="2" Text="" FontFamily="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource TextMid}"/>
+                            </Grid>
+                            <ProgressBar x:Name="ProgressBar" Minimum="0" Maximum="100" Value="0"/>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="24,0,0,0">
+                            <Button x:Name="BtnQuit"      Style="{StaticResource BtnGhost}"  Content="Quit"          Margin="0,0,8,0"/>
+                            <Button x:Name="BtnUninstall" Style="{StaticResource BtnDanger}" Content="Uninstall all" Margin="0,0,8,0"/>
+                            <Button x:Name="BtnRun"       Style="{StaticResource BtnPrimary}" Content="Run pipeline"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
         </Grid>
-
-        <Border Grid.Row="2" Background="#0A0C10" CornerRadius="6" Margin="0,14,0,0">
-            <ScrollViewer Name="LogScroll" VerticalScrollBarVisibility="Auto">
-                <TextBlock Name="LogOutput" Foreground="#B8C0CC" FontFamily="Consolas"
-                           FontSize="12" Padding="14" TextWrapping="Wrap"/>
-            </ScrollViewer>
-        </Border>
-
-        <Grid Grid.Row="3" Margin="0,14,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0">
-                <TextBlock Name="StatusText" Text="Ready." Foreground="#B8C0CC" FontSize="12" Margin="0,0,0,4"/>
-                <ProgressBar Name="ProgressBar" Height="8" Minimum="0" Maximum="100" Value="0"
-                             Background="#1A1D24" Foreground="#3B82F6" BorderThickness="0"/>
-            </StackPanel>
-            <TextBlock Grid.Column="1" Name="ProgressPct" Text="" Foreground="#7F8793" FontSize="12"
-                       Margin="12,0,0,0" VerticalAlignment="Center"/>
-        </Grid>
-
-        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
-            <Button Name="BtnQuit"      Content="Quit"          Width="100" Height="34" Margin="0,0,10,0"
-                    Background="#2A2F38" Foreground="#E6E8EB" BorderThickness="0" FontSize="13"/>
-            <Button Name="BtnUninstall" Content="Uninstall all"  Width="140" Height="34" Margin="0,0,10,0"
-                    Background="#7F1D1D" Foreground="White"     BorderThickness="0" FontSize="13"/>
-            <Button Name="BtnRun"       Content="Run"            Width="130" Height="34"
-                    Background="#3B82F6" Foreground="White"     BorderThickness="0"
-                    FontWeight="Bold" FontSize="13"/>
-        </StackPanel>
     </Grid>
+    </Border>
 </Window>
 '@
 
 $reader = New-Object System.Xml.XmlNodeReader $xaml
-$window = [Windows.Markup.XamlReader]::Load($reader)
+try {
+    $window = [Windows.Markup.XamlReader]::Load($reader)
+} catch {
+    Write-Host ""
+    Write-Host "===== XAML PARSE FAILED =====" -ForegroundColor Red
+    $ex = $_.Exception
+    $depth = 0
+    while ($ex) {
+        Write-Host ("[{0}] {1}: {2}" -f $depth, $ex.GetType().Name, $ex.Message) -ForegroundColor Yellow
+        if ($ex -is [System.Windows.Markup.XamlParseException]) {
+            Write-Host ("     Line {0}, Pos {1}" -f $ex.LineNumber, $ex.LinePosition) -ForegroundColor Yellow
+        }
+        $ex = $ex.InnerException
+        $depth++
+    }
+    Write-Host "=============================" -ForegroundColor Red
+    throw
+}
 
 $controls = @{}
 foreach ($n in 'AppPanel','LogOutput','LogScroll','BtnRun','BtnQuit','BtnUninstall','BtnSelectAllApps',
                'StatusText','ProgressBar','ProgressPct','VersionLabel',
+               'BtnMin','BtnMax','BtnClose',
+               'HeadSub','AppCount','TweakCount',
+               'SysCpu','SysGpu','SysRam','SysDisk','StatusWinget','StatusDisk',
+               'ChipAll','ChipDiag','ChipBench','ChipGpu','ChipStab','ChipInfo','ChipCpu',
                'TweakPowerNever','TweakDisableHibernate','TweakClearDownloads',
                'TweakEmptyRecycle','TweakClearBrowser','TweakStartGrid','TweakRemoveBloat',
                'OptGpuDriver','OptWindowsUpdate','OptBenchReport','OptKeepTemp') {
     $controls[$n] = $window.FindName($n)
 }
 $controls.VersionLabel.Text = $SCRIPT_VERSION
+
+# Title bar window controls
+$controls.BtnMin.Add_Click({ $window.WindowState = 'Minimized' })
+$controls.BtnMax.Add_Click({
+    if ($window.WindowState -eq 'Maximized') { $window.WindowState = 'Normal' }
+    else { $window.WindowState = 'Maximized' }
+})
+$controls.BtnClose.Add_Click({ $window.Close() })
+
+# Header subtitle + sidebar machine info
+try {
+    $osCap = (Get-CimInstance Win32_OperatingSystem -EA SilentlyContinue).Caption
+    if ($osCap) { $osName = ($osCap -replace '^Microsoft\s+','').Trim() } else { $osName = 'Windows' }
+    $controls.HeadSub.Text = "$env:COMPUTERNAME   |   $osName   |   $(Get-Date -Format 'dd/MM/yyyy')"
+    $cpu = (Get-CimInstance Win32_Processor -EA SilentlyContinue | Select-Object -First 1).Name
+    $gpu = (Get-CimInstance Win32_VideoController -EA SilentlyContinue | Where-Object { $_.Name -notmatch 'Virtual|Basic' } | Select-Object -First 1).Name
+    $ram = [Math]::Round(((Get-CimInstance Win32_PhysicalMemory -EA SilentlyContinue | Measure-Object Capacity -Sum).Sum / 1GB), 0)
+    $vol = Get-Volume -DriveLetter C -EA SilentlyContinue
+    $freeGB = if ($vol) { [Math]::Round($vol.SizeRemaining/1GB,1) } else { $null }
+    if ($cpu) { $controls.SysCpu.Text = $cpu }
+    if ($gpu) { $controls.SysGpu.Text = $gpu }
+    if ($ram) { $controls.SysRam.Text = "${ram} GB RAM" }
+    if ($freeGB) {
+        $controls.SysDisk.Text = "C: ${freeGB} GB free"
+        $controls.StatusDisk.Text = "disk  ${freeGB} GB free"
+    }
+} catch {}
 
 $sync = [hashtable]::Synchronized(@{})
 $sync.Window         = $window
@@ -239,12 +840,79 @@ function Write-Log {
 
 $appCheckboxes = @{}
 foreach ($app in $script:AppCatalog) {
+    # Row: custom checkbox with two-line content (name + mono sub-line with id / source / category)
     $cb = New-Object System.Windows.Controls.CheckBox
-    $cb.Content   = "$($app.Name)   —   $($app.Category)"
     $cb.IsChecked = ($script:DefaultChecked -contains $app.Id)
-    $controls.AppPanel.AddChild($cb) | Out-Null
+    $cb.Tag       = $app.Category  # used for chip filtering
+
+    $stack = New-Object System.Windows.Controls.StackPanel
+    $line1 = New-Object System.Windows.Controls.TextBlock
+    $line1.Text       = $app.Name
+    $line1.FontSize   = 13
+    $line1.Foreground = [System.Windows.Media.Brushes]::Gainsboro
+    [void]$stack.Children.Add($line1)
+
+    $line2 = New-Object System.Windows.Controls.TextBlock
+    $line2.Text       = "$($app.Id)   $($app.Source)   $($app.Category)"
+    $line2.FontFamily = New-Object System.Windows.Media.FontFamily('Cascadia Mono, Consolas, Courier New')
+    $line2.FontSize   = 10.5
+    $line2.Foreground = (New-Object System.Windows.Media.SolidColorBrush([System.Windows.Media.ColorConverter]::ConvertFromString('#8891A0')))
+    $line2.Margin     = '0,2,0,0'
+    [void]$stack.Children.Add($line2)
+
+    $cb.Content = $stack
+    [void]$controls.AppPanel.AddChild($cb)
     $appCheckboxes[$app.Id] = $cb
 }
+
+# Selection-count updater
+$updateCounts = {
+    $sel = ($appCheckboxes.Values | Where-Object { $_.IsChecked }).Count
+    $controls.AppCount.Text = "$sel / $($script:AppCatalog.Count) selected"
+    $tweakBoxes = @($controls.TweakPowerNever, $controls.TweakDisableHibernate, $controls.TweakClearDownloads,
+                    $controls.TweakEmptyRecycle, $controls.TweakClearBrowser, $controls.TweakStartGrid, $controls.TweakRemoveBloat)
+    $tw = ($tweakBoxes | Where-Object { $_.IsChecked }).Count
+    $controls.TweakCount.Text = "$tw enabled"
+}
+foreach ($cb in $appCheckboxes.Values) {
+    $cb.Add_Checked($updateCounts); $cb.Add_Unchecked($updateCounts)
+}
+foreach ($n in 'TweakPowerNever','TweakDisableHibernate','TweakClearDownloads',
+               'TweakEmptyRecycle','TweakClearBrowser','TweakStartGrid','TweakRemoveBloat') {
+    $controls[$n].Add_Checked($updateCounts); $controls[$n].Add_Unchecked($updateCounts)
+}
+& $updateCounts
+
+# Chip filtering
+$currentFilter = [ref]'All'
+$chipBtns = @{
+    'All'         = $controls.ChipAll
+    'Diagnostics' = $controls.ChipDiag
+    'Benchmark'   = $controls.ChipBench
+    'GPU stress'  = $controls.ChipGpu
+    'Stability'   = $controls.ChipStab
+    'Info'        = $controls.ChipInfo
+    'CPU torture' = $controls.ChipCpu
+}
+$applyFilter = {
+    param($cat)
+    $currentFilter.Value = $cat
+    foreach ($kvp in $chipBtns.GetEnumerator()) {
+        $isActive = ($kvp.Key -eq $cat)
+        $bg = if ($isActive) { '#2A3040' } else { 'Transparent' }
+        $fg = if ($isActive) { '#F1F3F6' } else { '#8891A0' }
+        $kvp.Value.Background = (New-Object System.Windows.Media.SolidColorBrush([System.Windows.Media.ColorConverter]::ConvertFromString($bg)))
+        $kvp.Value.Foreground = (New-Object System.Windows.Media.SolidColorBrush([System.Windows.Media.ColorConverter]::ConvertFromString($fg)))
+    }
+    foreach ($cb in $appCheckboxes.Values) {
+        $cb.Visibility = if ($cat -eq 'All' -or $cb.Tag -eq $cat) { 'Visible' } else { 'Collapsed' }
+    }
+}
+foreach ($kvp in $chipBtns.GetEnumerator()) {
+    $k = $kvp.Key
+    $kvp.Value.Add_Click({ & $applyFilter $k }.GetNewClosure())
+}
+& $applyFilter 'All'
 
 function Invoke-PreflightChecks {
     param([int]$MinFreeGB = 10)
@@ -319,7 +987,8 @@ function Set-UiProgress {
     param([double]$v)
     $sync.Progress.Dispatcher.Invoke([action]{
         $sync.Progress.Value = $v
-        $sync.ProgressPct.Text = "{0:N0}%" -f $v
+        if ($v -le 0) { $sync.ProgressPct.Text = '' }
+        else          { $sync.ProgressPct.Text = ("{0:N0}%" -f $v) }
     })
 }
 function Set-UiBusy {
@@ -636,7 +1305,7 @@ function Invoke-RegistryUninstall { param($App)
 function Remove-BloatPackage {
     param([string]$Name, [string]$Match)
     $pkgs = Get-AppxPackage -Name "*$Match*" -ErrorAction SilentlyContinue
-    if (-not $pkgs) { Write-UiLog "$Name: not installed." 'INFO'; Add-Result $Name 'debloat' 'SKIP' 'not present'; return }
+    if (-not $pkgs) { Write-UiLog "${Name}: not installed." 'INFO'; Add-Result $Name 'debloat' 'SKIP' 'not present'; return }
     foreach ($pkg in $pkgs) {
         try {
             Remove-AppxPackage -Package $pkg.PackageFullName -ErrorAction Stop
@@ -825,8 +1494,12 @@ function New-BenchReport {
 }
 
 try {
+    # BREADCRUMB 1: did the runspace even start?
+    Add-Content -Path "$env:TEMP\pcbt-pipeline-trace.log" -Value "[$(Get-Date -Format 'HH:mm:ss.fff')] runspace entered" -ErrorAction SilentlyContinue
     Set-UiBusy $true
+    Add-Content -Path "$env:TEMP\pcbt-pipeline-trace.log" -Value "[$(Get-Date -Format 'HH:mm:ss.fff')] Set-UiBusy returned" -ErrorAction SilentlyContinue
     Set-UiProgress 0
+    Add-Content -Path "$env:TEMP\pcbt-pipeline-trace.log" -Value "[$(Get-Date -Format 'HH:mm:ss.fff')] Set-UiProgress returned" -ErrorAction SilentlyContinue
     $sync.RunResults = @()
     $apps   = @($sync.SelectedApps)
     $tweaks = $sync.SelectedTweaks
@@ -923,6 +1596,7 @@ finally { Set-UiBusy $false }
 
 function Start-Pipeline {
     param([string]$Mode, [array]$SelectedApps, [hashtable]$SelectedTweaks, [hashtable]$SelectedOpts, [bool]$GenerateReport, [bool]$KeepTemp)
+    Remove-Item "$env:TEMP\pcbt-pipeline-trace.log" -ErrorAction SilentlyContinue
     $sync.Mode           = $Mode
     $sync.SelectedApps   = $SelectedApps
     $sync.SelectedTweaks = $SelectedTweaks
@@ -938,7 +1612,56 @@ function Start-Pipeline {
     $ps = [PowerShell]::Create()
     $ps.Runspace = $rs
     $null = $ps.AddScript($pipelineCode)
-    $null = $ps.BeginInvoke()
+    Add-Content -Path "$env:TEMP\pcbt-pipeline-trace.log" -Value "[$(Get-Date -Format 'HH:mm:ss.fff')] Start-Pipeline: about to BeginInvoke (mode=$Mode)" -ErrorAction SilentlyContinue
+
+    # Run async so the WPF UI stays responsive. The pipeline calls back into
+    # the UI via $sync.<ctrl>.Dispatcher.Invoke(...) — that only works if the
+    # UI thread is free to pump the dispatcher queue, hence BeginInvoke.
+    # Stash handles on $sync so the DispatcherTimer tick can reach them.
+    $sync.PsInstance  = $ps
+    $sync.RunspaceObj = $rs
+    $sync.AsyncResult = $ps.BeginInvoke()
+
+    # Poll completion from the UI thread. This never blocks: IsCompleted is a
+    # cheap flag check, and the actual work runs on the runspace thread.
+    $timer = New-Object System.Windows.Threading.DispatcherTimer
+    $timer.Interval = [TimeSpan]::FromMilliseconds(250)
+    $sync.PipelineTimer = $timer
+    $timer.Add_Tick({
+        if (-not $sync.AsyncResult.IsCompleted) { return }
+        $sync.PipelineTimer.Stop()
+        try {
+            $sync.PsInstance.EndInvoke($sync.AsyncResult) | Out-Null
+            Add-Content -Path "$env:TEMP\pcbt-pipeline-trace.log" -Value "[$(Get-Date -Format 'HH:mm:ss.fff')] EndInvoke completed, HadErrors=$($sync.PsInstance.HadErrors)" -ErrorAction SilentlyContinue
+        } catch {
+            $msg = "Pipeline threw on EndInvoke: $($_.Exception.Message)"
+            Write-Log $msg 'ERROR'
+            Add-Content -Path "$env:TEMP\pcbt-pipeline-trace.log" -Value $msg -ErrorAction SilentlyContinue
+            if ($_.Exception.InnerException) {
+                $inner = "  inner: $($_.Exception.InnerException.Message)"
+                Write-Log $inner 'ERROR'
+                Add-Content -Path "$env:TEMP\pcbt-pipeline-trace.log" -Value $inner -ErrorAction SilentlyContinue
+            }
+        }
+        if ($sync.PsInstance.HadErrors) {
+            foreach ($err in $sync.PsInstance.Streams.Error) {
+                Write-Log "Runspace error: $err" 'ERROR'
+                Add-Content -Path "$env:TEMP\pcbt-pipeline-trace.log" -Value "Runspace error: $err" -ErrorAction SilentlyContinue
+                if ($err.InvocationInfo -and $err.InvocationInfo.ScriptLineNumber) {
+                    $loc = "  at line $($err.InvocationInfo.ScriptLineNumber): $($err.InvocationInfo.Line.Trim())"
+                    Write-Log $loc 'ERROR'
+                    Add-Content -Path "$env:TEMP\pcbt-pipeline-trace.log" -Value $loc -ErrorAction SilentlyContinue
+                }
+            }
+        }
+        $sync.PsInstance.Dispose()
+        $sync.RunspaceObj.Close()
+        $sync.PsInstance    = $null
+        $sync.RunspaceObj   = $null
+        $sync.AsyncResult   = $null
+        $sync.PipelineTimer = $null
+    })
+    $timer.Start()
 }
 
 $controls.BtnQuit.Add_Click({ $window.Close() })
