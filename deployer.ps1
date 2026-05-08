@@ -81,7 +81,7 @@ $script:BloatList = @(
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="PC Build Toolkit" Height="860" Width="1180"
+        Title="PC Build Toolkit" Height="860" Width="1180" MinWidth="920" MinHeight="660"
         WindowStartupLocation="CenterScreen" Background="#12151B"
         FontFamily="Segoe UI" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
     <Window.Resources>
@@ -264,6 +264,71 @@ $script:BloatList = @(
                                             <Ellipse.Fill>
                                                 <SolidColorBrush Color="#7D8795"/>
                                             </Ellipse.Fill>
+                                        </Ellipse>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Row" Property="Background" Value="{StaticResource BgHover}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="#4FA3FF"/>
+                                <Setter TargetName="Track" Property="BorderBrush" Value="#4FA3FF"/>
+                                <Setter TargetName="Thumb" Property="Fill" Value="#0B1320"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <ThicknessAnimation Storyboard.TargetName="Thumb" Storyboard.TargetProperty="Margin"
+                                                                To="17,0,0,0" Duration="0:0:0.12"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <ThicknessAnimation Storyboard.TargetName="Thumb" Storyboard.TargetProperty="Margin"
+                                                                To="2,0,0,0" Duration="0:0:0.12"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ================= Toggle switch — destructive variant (amber left stripe) ================= -->
+        <Style x:Key="ToggleSwitchDestructive" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource TextHi}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Tag" Value=""/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Border x:Name="Row" Background="Transparent" CornerRadius="6" Padding="10,8"
+                                BorderBrush="{StaticResource Amber}" BorderThickness="3,0,0,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}" FontSize="13" FontWeight="Medium"/>
+                                    <TextBlock Text="{TemplateBinding Tag}" Foreground="{StaticResource Amber}" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <Border x:Name="Track" Grid.Column="1" Width="34" Height="19" CornerRadius="10"
+                                        BorderThickness="1" VerticalAlignment="Center" Margin="14,0,0,0">
+                                    <Border.Background><SolidColorBrush Color="#1A1F2A"/></Border.Background>
+                                    <Border.BorderBrush><SolidColorBrush Color="#2A3140"/></Border.BorderBrush>
+                                    <Grid>
+                                        <Ellipse x:Name="Thumb" Width="13" Height="13"
+                                                 HorizontalAlignment="Left" VerticalAlignment="Center" Margin="2,0,0,0">
+                                            <Ellipse.Fill><SolidColorBrush Color="#7D8795"/></Ellipse.Fill>
                                         </Ellipse>
                                     </Grid>
                                 </Border>
@@ -568,11 +633,11 @@ $script:BloatList = @(
                     <StackPanel Grid.Row="2" Margin="18,12,18,16">
                         <Rectangle Fill="{StaticResource Line}" Height="1" Margin="0,0,0,10"/>
                         <StackPanel Orientation="Horizontal" Margin="0,3">
-                            <Ellipse Width="6" Height="6" Fill="{StaticResource Lime}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                            <TextBlock x:Name="StatusWinget" Text="winget  healthy" Foreground="{StaticResource TextMuted}" FontFamily="{StaticResource Mono}" FontSize="10.5"/>
+                            <Ellipse x:Name="StatusWingetDot" Width="6" Height="6" Fill="{StaticResource Amber}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock x:Name="StatusWinget" Text="winget  checking" Foreground="{StaticResource TextMuted}" FontFamily="{StaticResource Mono}" FontSize="10.5"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,3">
-                            <Ellipse Width="6" Height="6" Fill="{StaticResource Lime}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <Ellipse x:Name="StatusDiskDot" Width="6" Height="6" Fill="{StaticResource Amber}" VerticalAlignment="Center" Margin="0,0,8,0"/>
                             <TextBlock x:Name="StatusDisk" Text="disk  -- GB free" Foreground="{StaticResource TextMuted}" FontFamily="{StaticResource Mono}" FontSize="10.5"/>
                         </StackPanel>
                     </StackPanel>
@@ -592,6 +657,8 @@ $script:BloatList = @(
                     <StackPanel>
                         <TextBlock Text="Deploy new bench run" FontSize="17" FontWeight="SemiBold"/>
                         <TextBlock x:Name="HeadSub" FontFamily="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource TextMuted}" Margin="0,3,0,0"/>
+                        <TextBlock x:Name="UpdateBanner" Visibility="Collapsed" FontFamily="{StaticResource Mono}"
+                                   FontSize="11" Foreground="{StaticResource Amber}" Margin="0,6,0,0"/>
                     </StackPanel>
                 </Border>
 
@@ -672,11 +739,11 @@ $script:BloatList = @(
 
                                 <CheckBox x:Name="TweakPowerNever"       Style="{StaticResource ToggleSwitch}" Content="Power plan &#8594; never"                Tag="Display, sleep and hibernate timeouts set to never"/>
                                 <CheckBox x:Name="TweakDisableHibernate" Style="{StaticResource ToggleSwitch}" Content="Disable hibernation"                   Tag="powercfg -h off (frees hiberfil.sys from system drive)"/>
-                                <CheckBox x:Name="TweakClearDownloads"   Style="{StaticResource ToggleSwitch}" Content="Clear Downloads folder"                Tag="Destructive. Wipes %USERPROFILE%\Downloads recursively"/>
+                                <CheckBox x:Name="TweakClearDownloads"   Style="{StaticResource ToggleSwitchDestructive}" Content="Clear Downloads folder"      Tag="Destructive — wipes %USERPROFILE%\Downloads recursively"/>
                                 <CheckBox x:Name="TweakEmptyRecycle"     Style="{StaticResource ToggleSwitch}" Content="Empty Recycle Bin"                     Tag="All drives"/>
                                 <CheckBox x:Name="TweakClearBrowser"     Style="{StaticResource ToggleSwitch}" Content="Clear browser history"                 Tag="Edge, Chrome, Firefox &#8212; close browsers first"/>
                                 <CheckBox x:Name="TweakStartGrid"        Style="{StaticResource ToggleSwitch}" Content="Start menu grid layout"                Tag="Windows 11 &#8212; requires sign out / in"/>
-                                <CheckBox x:Name="TweakRemoveBloat"      Style="{StaticResource ToggleSwitch}" Content="Remove Windows bloat"                  Tag="17 AppX packages + Quick Assist (per-user)"/>
+                                <CheckBox x:Name="TweakRemoveBloat"      Style="{StaticResource ToggleSwitchDestructive}" Content="Remove Windows bloat"        Tag="17 AppX packages + Quick Assist removed per-user (irreversible)"/>
 
                                 <TextBlock Text="OUTPUT" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextDim}" Margin="4,14,0,4"/>
                                 <CheckBox x:Name="OptBenchReport" Style="{StaticResource ToggleSwitch}" Content="Generate bench report" Tag="Writes summary .txt to Desktop after run" IsChecked="True"/>
@@ -694,17 +761,23 @@ $script:BloatList = @(
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
                             <Border Grid.Row="0" Background="#10141C" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="14,10">
-                                <StackPanel Orientation="Horizontal">
-                                    <Ellipse Width="8" Height="8" Fill="#E07A6B" Margin="0,0,5,0"/>
-                                    <Ellipse Width="8" Height="8" Fill="#E0B15B" Margin="0,0,5,0"/>
-                                    <Ellipse Width="8" Height="8" Fill="#8AE06B" Margin="0,0,14,0"/>
-                                    <TextBlock Text="LOG" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextHi}" VerticalAlignment="Center"/>
-                                    <TextBlock Text="   streaming to %TEMP%\pcbt.log" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
-                                </StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                        <Ellipse Width="8" Height="8" Fill="#E07A6B" Margin="0,0,5,0"/>
+                                        <Ellipse Width="8" Height="8" Fill="#E0B15B" Margin="0,0,5,0"/>
+                                        <Ellipse Width="8" Height="8" Fill="#8AE06B" Margin="0,0,14,0"/>
+                                        <TextBlock Text="LOG" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextHi}" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="LogPathLabel" Text="   streaming to %TEMP%\pcbt.log" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                    <Button x:Name="BtnClearLog" Grid.Column="1" Style="{StaticResource ChipBtn}" Content="clear" Margin="0" VerticalAlignment="Center"/>
+                                </Grid>
                             </Border>
                             <ScrollViewer x:Name="LogScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="14,10">
-                                <TextBlock x:Name="LogOutput" FontFamily="{StaticResource Mono}" FontSize="11.5"
-                                           Foreground="{StaticResource TextMid}" TextWrapping="Wrap" LineHeight="18"/>
+                                <StackPanel x:Name="LogOutput"/>
                             </ScrollViewer>
                         </Grid>
                     </Border>
@@ -729,6 +802,8 @@ $script:BloatList = @(
                                 <TextBlock x:Name="ProgressPct" Grid.Column="2" Text="" FontFamily="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource TextMid}"/>
                             </Grid>
                             <ProgressBar x:Name="ProgressBar" Minimum="0" Maximum="100" Value="0"/>
+                            <TextBlock x:Name="RunSummary" Visibility="Collapsed" FontFamily="{StaticResource Mono}"
+                                       FontSize="10.5" Foreground="{StaticResource TextMuted}" Margin="0,7,0,0"/>
                         </StackPanel>
 
                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="24,0,0,0">
@@ -768,9 +843,10 @@ try {
 $controls = @{}
 foreach ($n in 'AppPanel','LogOutput','LogScroll','BtnRun','BtnQuit','BtnUninstall','BtnSelectAllApps',
                'StatusText','ProgressBar','ProgressPct','VersionLabel',
-               'BtnMin','BtnMax','BtnClose',
-               'HeadSub','AppCount','TweakCount',
+               'BtnMin','BtnMax','BtnClose','BtnClearLog',
+               'HeadSub','AppCount','TweakCount','UpdateBanner','RunSummary','LogPathLabel',
                'SysCpu','SysGpu','SysRam','SysDisk','StatusWinget','StatusDisk',
+               'StatusWingetDot','StatusDiskDot',
                'ChipAll','ChipDiag','ChipBench','ChipGpu','ChipStab','ChipInfo','ChipCpu',
                'TweakPowerNever','TweakDisableHibernate','TweakClearDownloads',
                'TweakEmptyRecycle','TweakClearBrowser','TweakStartGrid','TweakRemoveBloat',
@@ -803,7 +879,19 @@ try {
     if ($freeGB) {
         $controls.SysDisk.Text = "C: ${freeGB} GB free"
         $controls.StatusDisk.Text = "disk  ${freeGB} GB free"
+        $diskColor = if ($freeGB -lt 10) { '#E0B15B' } else { '#8AE06B' }
+        $controls.StatusDiskDot.Fill = New-Object System.Windows.Media.SolidColorBrush(
+            [System.Windows.Media.ColorConverter]::ConvertFromString($diskColor))
     }
+    # winget health quick check
+    try {
+        $null = & winget source list 2>&1
+        $wgOk = $LASTEXITCODE -eq 0
+    } catch { $wgOk = $false }
+    $wgColor = if ($wgOk) { '#8AE06B' } else { '#E07A6B' }
+    $controls.StatusWingetDot.Fill = New-Object System.Windows.Media.SolidColorBrush(
+        [System.Windows.Media.ColorConverter]::ConvertFromString($wgColor))
+    $controls.StatusWinget.Text = if ($wgOk) { 'winget  healthy' } else { 'winget  not found' }
 } catch {}
 
 $sync = [hashtable]::Synchronized(@{})
@@ -815,7 +903,11 @@ $sync.Progress       = $controls.ProgressBar
 $sync.ProgressPct    = $controls.ProgressPct
 $sync.BtnRun         = $controls.BtnRun
 $sync.BtnUninst      = $controls.BtnUninstall
+$sync.BtnQuit        = $controls.BtnQuit
+$sync.RunSummary     = $controls.RunSummary
+$sync.UpdateBanner   = $controls.UpdateBanner
 $sync.LogPath        = Join-Path $env:TEMP 'pcbt.log'
+$controls.LogPathLabel.Text = "   streaming to $($sync.LogPath)"
 $sync.AppCatalog     = $script:AppCatalog
 $sync.BloatList      = $script:BloatList
 $sync.SevenZipUrl    = $SCRIPT_7ZA_DIRECT
@@ -865,8 +957,21 @@ function Write-Log {
     $stamp = Get-Date -Format 'HH:mm:ss'
     $line  = "[$stamp] [$Level] $Message"
     Add-Content -Path $sync.LogPath -Value $line -ErrorAction SilentlyContinue
+    $logLine = $line; $logLevel = $Level
     $sync.Log.Dispatcher.Invoke([action]{
-        $sync.Log.Text += ($line + "`n")
+        $clr = switch ($logLevel) {
+            'OK'    { '#8AE06B' }
+            'WARN'  { '#E0B15B' }
+            'ERROR' { '#E07A6B' }
+            default { '#8891A0' }
+        }
+        $tb = New-Object System.Windows.Controls.TextBlock
+        $tb.Text        = $logLine
+        $tb.Foreground  = New-Object System.Windows.Media.SolidColorBrush([System.Windows.Media.ColorConverter]::ConvertFromString($clr))
+        $tb.FontFamily  = New-Object System.Windows.Media.FontFamily('Cascadia Mono, Consolas, Courier New')
+        $tb.FontSize    = 11.5
+        $tb.TextWrapping = 'Wrap'
+        [void]$sync.Log.Children.Add($tb)
         $sync.LogScroll.ScrollToBottom()
     })
 }
@@ -987,6 +1092,8 @@ function Invoke-SelfUpdateCheck {
         $rHash  = -join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') })
         if ($local.Hash.ToLower() -ne $rHash.ToLower()) {
             Write-Log "A newer version is available at $SCRIPT_RAW_URL" 'INFO'
+            $controls.UpdateBanner.Text       = "Update available — run  irm fay.digital/pbt | iex  to get the latest version"
+            $controls.UpdateBanner.Visibility = 'Visible'
         } else { Write-Log "Running latest version ($SCRIPT_VERSION)." 'OK' }
     } catch { Write-Log "Self-update check skipped: $_" 'WARN' }
 }
@@ -997,8 +1104,21 @@ function Write-UiLog {
     $stamp = Get-Date -Format 'HH:mm:ss'
     $line  = "[$stamp] [$Level] $Message"
     Add-Content -Path $sync.LogPath -Value $line -ErrorAction SilentlyContinue
+    $logLine = $line; $logLevel = $Level
     $sync.Log.Dispatcher.Invoke([action]{
-        $sync.Log.Text += ($line + "`n")
+        $clr = switch ($logLevel) {
+            'OK'    { '#8AE06B' }
+            'WARN'  { '#E0B15B' }
+            'ERROR' { '#E07A6B' }
+            default { '#8891A0' }
+        }
+        $tb = New-Object System.Windows.Controls.TextBlock
+        $tb.Text         = $logLine
+        $tb.Foreground   = New-Object System.Windows.Media.SolidColorBrush([System.Windows.Media.ColorConverter]::ConvertFromString($clr))
+        $tb.FontFamily   = New-Object System.Windows.Media.FontFamily('Cascadia Mono, Consolas, Courier New')
+        $tb.FontSize     = 11.5
+        $tb.TextWrapping = 'Wrap'
+        [void]$sync.Log.Children.Add($tb)
         $sync.LogScroll.ScrollToBottom()
     })
 }
@@ -1006,12 +1126,18 @@ function Write-UiLogReplace {
     param([string]$Message)
     $stamp = Get-Date -Format 'HH:mm:ss'
     $line  = "[$stamp] [INFO] $Message"
+    $logLine = $line
     $sync.Log.Dispatcher.Invoke([action]{
-        $text = $sync.Log.Text
-        if ($text.EndsWith("`n")) { $text = $text.Substring(0, $text.Length - 1) }
-        $lastNewline = $text.LastIndexOf("`n")
-        if ($lastNewline -ge 0) { $text = $text.Substring(0, $lastNewline + 1) } else { $text = '' }
-        $sync.Log.Text = $text + $line + "`n"
+        if ($sync.Log.Children.Count -gt 0) {
+            $sync.Log.Children.RemoveAt($sync.Log.Children.Count - 1)
+        }
+        $tb = New-Object System.Windows.Controls.TextBlock
+        $tb.Text         = $logLine
+        $tb.Foreground   = New-Object System.Windows.Media.SolidColorBrush([System.Windows.Media.ColorConverter]::ConvertFromString('#8891A0'))
+        $tb.FontFamily   = New-Object System.Windows.Media.FontFamily('Cascadia Mono, Consolas, Courier New')
+        $tb.FontSize     = 11.5
+        $tb.TextWrapping = 'Wrap'
+        [void]$sync.Log.Children.Add($tb)
         $sync.LogScroll.ScrollToBottom()
     })
 }
@@ -1029,6 +1155,7 @@ function Set-UiBusy {
     $sync.BtnRun.Dispatcher.Invoke([action]{
         $sync.BtnRun.IsEnabled    = -not $busy
         $sync.BtnUninst.IsEnabled = -not $busy
+        $sync.BtnQuit.IsEnabled   = -not $busy
     })
 }
 function Add-Result { param($Name, $Action, $Status, $Detail='')
@@ -1785,6 +1912,8 @@ finally { Set-UiBusy $false }
 function Start-Pipeline {
     param([string]$Mode, [array]$SelectedApps, [hashtable]$SelectedTweaks, [hashtable]$SelectedOpts, [bool]$GenerateReport, [bool]$KeepTemp)
     Remove-Item "$env:TEMP\pcbt-pipeline-trace.log" -ErrorAction SilentlyContinue
+    $sync.RunSummary.Visibility = 'Collapsed'
+    $sync.RunSummary.Text       = ''
     $sync.Mode           = $Mode
     $sync.SelectedApps   = $SelectedApps
     $sync.SelectedTweaks = $SelectedTweaks
@@ -1848,15 +1977,35 @@ function Start-Pipeline {
         $sync.RunspaceObj   = $null
         $sync.AsyncResult   = $null
         $sync.PipelineTimer = $null
+
+        # Build post-run summary line from structured results
+        $results = $sync.RunResults
+        if ($results -and $results.Count -gt 0) {
+            $ok   = ($results | Where-Object { $_.Status -eq 'OK'   }).Count
+            $warn = ($results | Where-Object { $_.Status -eq 'WARN' }).Count
+            $fail = ($results | Where-Object { $_.Status -eq 'FAIL' }).Count
+            $skip = ($results | Where-Object { $_.Status -eq 'SKIP' }).Count
+            $parts = @()
+            if ($ok)   { $parts += "$ok ok" }
+            if ($warn) { $parts += "$warn warn" }
+            if ($fail) { $parts += "$fail failed" }
+            if ($skip) { $parts += "$skip skipped" }
+            if ($parts.Count -gt 0) {
+                $sync.RunSummary.Text       = $parts -join '   |   '
+                $sync.RunSummary.Visibility = 'Visible'
+            }
+        }
     })
     $timer.Start()
 }
 
 $controls.BtnQuit.Add_Click({ $window.Close() })
+$controls.BtnClearLog.Add_Click({ $controls.LogOutput.Children.Clear() })
 $controls.BtnSelectAllApps.Add_Click({
-    $anyUnchecked = $appCheckboxes.Values | Where-Object { -not $_.IsChecked }
-    $newState = [bool]$anyUnchecked
-    $appCheckboxes.Values | ForEach-Object { $_.IsChecked = $newState }
+    $visible   = @($appCheckboxes.Values | Where-Object { $_.Visibility -eq 'Visible' })
+    $anyUnchecked = $visible | Where-Object { -not $_.IsChecked }
+    $newState  = [bool]$anyUnchecked
+    $visible | ForEach-Object { $_.IsChecked = $newState }
 })
 
 $controls.BtnRun.Add_Click({
