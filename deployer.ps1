@@ -277,6 +277,7 @@ $script:BloatList = @(
                                 <Setter TargetName="Track" Property="Background" Value="#4FA3FF"/>
                                 <Setter TargetName="Track" Property="BorderBrush" Value="#4FA3FF"/>
                                 <Setter TargetName="Thumb" Property="Fill" Value="#0B1320"/>
+                                <Setter TargetName="Thumb" Property="Margin" Value="17,0,0,0"/>
                                 <Trigger.EnterActions>
                                     <BeginStoryboard>
                                         <Storyboard>
