@@ -594,13 +594,11 @@ $script:BloatList = @(
                     <!-- Nav -->
                     <StackPanel Grid.Row="1" Margin="10,12,10,0">
                         <TextBlock Text="WORKSPACE" Foreground="{StaticResource TextDim}" FontFamily="{StaticResource Mono}" FontSize="10" Margin="10,4,0,6"/>
-                        <RadioButton x:Name="NavDeploy"  Style="{StaticResource NavItem}" IsChecked="True" GroupName="Nav" Content="Deploy"
+                        <RadioButton x:Name="NavDeploy" Style="{StaticResource NavItem}" IsChecked="True" GroupName="Nav" Content="Deploy"
                             Tag="M4,3 L13,3 L13,13 L4,13 Z M4,6 L13,6 M7,9 L10,9"/>
-                        <RadioButton x:Name="NavTweaks"  Style="{StaticResource NavItem}" GroupName="Nav" Content="System tweaks"
-                            Tag="M8,6 A2,2 0 1 1 7.99,6 M8,1.5 L8,3.5 M8,12.5 L8,14.5 M14.5,8 L12.5,8 M3.5,8 L1.5,8 M12.6,3.4 L11.2,4.8 M4.8,11.2 L3.4,12.6 M12.6,12.6 L11.2,11.2 M4.8,4.8 L3.4,3.4"/>
-                        <RadioButton x:Name="NavDrivers" Style="{StaticResource NavItem}" GroupName="Nav" Content="Drivers &amp; updates"
-                            Tag="M8,2 L8,10 M5,7 L8,10 L11,7 M3,13 L13,13"/>
-                        <RadioButton x:Name="NavLogs"    Style="{StaticResource NavItem}" GroupName="Nav" Content="Logs"
+                        <RadioButton x:Name="NavReport" Style="{StaticResource NavItem}" GroupName="Nav" Content="Report"
+                            Tag="M3,2 L13,2 L13,14 L3,14 Z M5,5 L11,5 M5,8 L11,8 M5,11 L9,11"/>
+                        <RadioButton x:Name="NavLogs"   Style="{StaticResource NavItem}" GroupName="Nav" Content="Logs"
                             Tag="M3,4 L13,4 M3,8 L13,8 M3,12 L13,12"/>
 
                         <TextBlock Text="MACHINE" Foreground="{StaticResource TextDim}" FontFamily="{StaticResource Mono}" FontSize="10" Margin="10,18,0,6"/>
@@ -656,7 +654,7 @@ $script:BloatList = @(
                 <!-- Head -->
                 <Border Grid.Row="0" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="22,16">
                     <StackPanel>
-                        <TextBlock Text="Deploy new bench run" FontSize="17" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="HeadTitle" Text="Deploy new bench run" FontSize="17" FontWeight="SemiBold"/>
                         <TextBlock x:Name="HeadSub" FontFamily="{StaticResource Mono}" FontSize="11" Foreground="{StaticResource TextMuted}" Margin="0,3,0,0"/>
                         <TextBlock x:Name="UpdateBanner" Visibility="Collapsed" FontFamily="{StaticResource Mono}"
                                    FontSize="11" Foreground="{StaticResource Amber}" Margin="0,6,0,0"/>
@@ -664,18 +662,21 @@ $script:BloatList = @(
                 </Border>
 
                 <!-- Content: two cards side by side + console below -->
-                <Grid Grid.Row="1" Margin="22,14,22,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
+                <Grid x:Name="BodyGrid" Grid.Row="1" Margin="22,14,22,0">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="220"/>
                     </Grid.RowDefinitions>
 
+                    <!-- Deploy view: apps + tweaks cards -->
+                    <Grid x:Name="DeployTop" Grid.Row="0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
                     <!-- Applications card -->
-                    <Border Grid.Column="0" Grid.Row="0" Background="{StaticResource BgPanel}" CornerRadius="8"
+                    <Border Grid.Column="0" Background="{StaticResource BgPanel}" CornerRadius="8"
                             BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="16,14" Margin="0,0,7,0">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -725,7 +726,7 @@ $script:BloatList = @(
                     </Border>
 
                     <!-- System tweaks card -->
-                    <Border Grid.Column="1" Grid.Row="0" Background="{StaticResource BgPanel}" CornerRadius="8"
+                    <Border Grid.Column="1" Background="{StaticResource BgPanel}" CornerRadius="8"
                             BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="16,14" Margin="7,0,0,0">
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel>
@@ -747,14 +748,15 @@ $script:BloatList = @(
                                 <CheckBox x:Name="TweakRemoveBloat"      Style="{StaticResource ToggleSwitchDestructive}" Content="Remove Windows bloat"        Tag="17 AppX packages + Quick Assist removed per-user (irreversible)"/>
 
                                 <TextBlock Text="OUTPUT" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextDim}" Margin="4,14,0,4"/>
-                                <CheckBox x:Name="OptBenchReport" Style="{StaticResource ToggleSwitch}" Content="Generate bench report" Tag="Writes summary .txt to Desktop after run" IsChecked="True"/>
                                 <CheckBox x:Name="OptKeepTemp"    Style="{StaticResource ToggleSwitch}" Content="Keep temp files"      Tag="Retains downloads and extracted archives for debug"/>
                             </StackPanel>
                         </ScrollViewer>
                     </Border>
 
-                    <!-- Console (spans both columns) -->
-                    <Border Grid.Row="1" Grid.ColumnSpan="2" Background="#0B0E14" CornerRadius="8"
+                    </Grid><!-- /DeployTop -->
+
+                    <!-- Console -->
+                    <Border x:Name="LogConsole" Grid.Row="1" Background="#0B0E14" CornerRadius="8"
                             BorderBrush="{StaticResource Line}" BorderThickness="1" Margin="0,14,0,0">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -780,6 +782,72 @@ $script:BloatList = @(
                             <ScrollViewer x:Name="LogScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="14,10">
                                 <StackPanel x:Name="LogOutput"/>
                             </ScrollViewer>
+                        </Grid>
+                    </Border>
+
+                    <!-- Report view (overlays body when active) -->
+                    <Border x:Name="ReportPanel" Grid.Row="0" Grid.RowSpan="2"
+                            Background="{StaticResource BgPanel}" CornerRadius="8"
+                            BorderBrush="{StaticResource Line}" BorderThickness="1"
+                            Padding="22,18" Visibility="Collapsed">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- System info -->
+                            <StackPanel Grid.Row="0" Margin="0,0,0,14">
+                                <TextBlock Text="SYSTEM" FontFamily="{StaticResource Mono}" FontSize="10.5"
+                                           Foreground="{StaticResource TextMid}" Margin="0,0,0,8"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="110"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition/><RowDefinition/><RowDefinition/>
+                                        <RowDefinition/><RowDefinition/><RowDefinition/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Hostname"    FontFamily="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource TextMuted}" Margin="0,2"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="1" x:Name="RepHostname" FontFamily="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource TextHi}"   Margin="0,2"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="CPU"         FontFamily="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource TextMuted}" Margin="0,2"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" x:Name="RepCpu"     FontFamily="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource TextHi}"   Margin="0,2"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="GPU"         FontFamily="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource TextMuted}" Margin="0,2"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="1" x:Name="RepGpu"     FontFamily="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource TextHi}"   Margin="0,2"/>
+                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="RAM"         FontFamily="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource TextMuted}" Margin="0,2"/>
+                                    <TextBlock Grid.Row="3" Grid.Column="1" x:Name="RepRam"     FontFamily="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource TextHi}"   Margin="0,2"/>
+                                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Motherboard" FontFamily="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource TextMuted}" Margin="0,2"/>
+                                    <TextBlock Grid.Row="4" Grid.Column="1" x:Name="RepMobo"    FontFamily="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource TextHi}"   Margin="0,2"/>
+                                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Storage"     FontFamily="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource TextMuted}" Margin="0,2"/>
+                                    <TextBlock Grid.Row="5" Grid.Column="1" x:Name="RepStorage" FontFamily="{StaticResource Mono}" FontSize="11.5" Foreground="{StaticResource TextHi}"   Margin="0,2"/>
+                                </Grid>
+                            </StackPanel>
+
+                            <!-- Live actions list -->
+                            <Border Grid.Row="1" Background="#0B0E14" CornerRadius="6"
+                                    BorderBrush="{StaticResource Line}" BorderThickness="1">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+                                    <Border Grid.Row="0" Padding="14,8"
+                                            BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1">
+                                        <TextBlock Text="ACTIONS" FontFamily="{StaticResource Mono}" FontSize="10.5"
+                                                   Foreground="{StaticResource TextHi}"/>
+                                    </Border>
+                                    <ScrollViewer Grid.Row="1" Padding="12,8" VerticalScrollBarVisibility="Auto">
+                                        <StackPanel x:Name="ReportActions"/>
+                                    </ScrollViewer>
+                                </Grid>
+                            </Border>
+
+                            <!-- Footer note -->
+                            <TextBlock Grid.Row="2" x:Name="ReportFooter" Margin="0,10,0,0"
+                                       FontFamily="{StaticResource Mono}" FontSize="10.5"
+                                       Foreground="{StaticResource TextMuted}"/>
                         </Grid>
                     </Border>
                 </Grid>
@@ -845,13 +913,17 @@ $controls = @{}
 foreach ($n in 'AppPanel','LogOutput','LogScroll','BtnRun','BtnQuit','BtnUninstall','BtnSelectAllApps',
                'StatusText','ProgressBar','ProgressPct','VersionLabel',
                'BtnMin','BtnMax','BtnClose','BtnClearLog',
-               'HeadSub','AppCount','TweakCount','UpdateBanner','RunSummary','LogPathLabel',
+               'HeadTitle','HeadSub','AppCount','TweakCount','UpdateBanner','RunSummary','LogPathLabel',
                'SysCpu','SysGpu','SysRam','SysDisk','StatusWinget','StatusDisk',
                'StatusWingetDot','StatusDiskDot',
                'ChipAll','ChipDiag','ChipBench','ChipGpu','ChipStab','ChipInfo','ChipCpu',
                'TweakPowerNever','TweakDisableHibernate','TweakClearDownloads',
                'TweakEmptyRecycle','TweakClearBrowser','TweakStartGrid','TweakRemoveBloat',
-               'OptGpuDriver','OptWindowsUpdate','OptBenchReport','OptKeepTemp') {
+               'OptGpuDriver','OptWindowsUpdate','OptKeepTemp',
+               'NavDeploy','NavReport','NavLogs',
+               'BodyGrid','DeployTop','LogConsole','ReportPanel',
+               'RepHostname','RepCpu','RepGpu','RepRam','RepMobo','RepStorage',
+               'ReportActions','ReportFooter') {
     $controls[$n] = $window.FindName($n)
 }
 $controls.VersionLabel.Text = $SCRIPT_VERSION
@@ -877,6 +949,15 @@ try {
     if ($cpu) { $controls.SysCpu.Text = $cpu }
     if ($gpu) { $controls.SysGpu.Text = $gpu }
     if ($ram) { $controls.SysRam.Text = "${ram} GB RAM" }
+    $controls.RepHostname.Text = $env:COMPUTERNAME
+    if ($cpu) { $controls.RepCpu.Text = $cpu }
+    if ($gpu) { $controls.RepGpu.Text = $gpu }
+    if ($ram) { $controls.RepRam.Text = "${ram} GB" }
+    $mb = Get-CimInstance Win32_BaseBoard -EA SilentlyContinue
+    if ($mb) { $controls.RepMobo.Text = "$($mb.Manufacturer) $($mb.Product)".Trim() }
+    $diskLines = (Get-CimInstance Win32_DiskDrive -EA SilentlyContinue |
+                  ForEach-Object { "$($_.Model) ($([Math]::Round($_.Size/1GB,0)) GB)" }) -join "`n"
+    if ($diskLines) { $controls.RepStorage.Text = $diskLines }
     if ($freeGB) {
         $controls.SysDisk.Text = "C: ${freeGB} GB free"
         $controls.StatusDisk.Text = "disk  ${freeGB} GB free"
@@ -914,9 +995,10 @@ $sync.Mode           = $null
 $sync.SelectedApps   = @()
 $sync.SelectedTweaks = @{}
 $sync.SelectedOpts   = @{}
-$sync.GenerateReport = $true
 $sync.KeepTemp       = $false
 $sync.RunResults     = @()
+$sync.ReportActions  = $controls.ReportActions
+$sync.ReportFooter   = $controls.ReportFooter
 
 # Windows Update needs to run in a real powershell.exe console host (PSWindowsUpdate's
 # Get-WindowsUpdate -Install fails in background runspaces with "the host program does
@@ -1159,6 +1241,22 @@ function Set-UiBusy {
 }
 function Add-Result { param($Name, $Action, $Status, $Detail='')
     $sync.RunResults += [pscustomobject]@{ App=$Name; Action=$Action; Status=$Status; Detail=$Detail }
+    $rN=$Name; $rA=$Action; $rS=$Status; $rD=$Detail
+    $sync.ReportActions.Dispatcher.Invoke([action]{
+        $clr = switch ($rS) {
+            'OK'    { '#8AE06B' }
+            'WARN'  { '#E0B15B' }
+            'FAIL'  { '#E07A6B' }
+            default { '#8891A0' }
+        }
+        $tb = New-Object System.Windows.Controls.TextBlock
+        $tb.Text       = ('[{0,-4}] {1,-22} {2,-10} {3}' -f $rS, $rN, $rA, $rD)
+        $tb.Foreground = New-Object System.Windows.Media.SolidColorBrush(
+            [System.Windows.Media.ColorConverter]::ConvertFromString($clr))
+        $tb.FontFamily = New-Object System.Windows.Media.FontFamily('Cascadia Mono, Consolas, Courier New')
+        $tb.FontSize   = 11.5
+        [void]$sync.ReportActions.Children.Add($tb)
+    })
 }
 
 function Invoke-StreamingDownload {
@@ -1776,38 +1874,6 @@ function Invoke-TweakClearBrowser {
     }
 }
 
-function New-BenchReport {
-    try {
-        $cpu  = (Get-CimInstance Win32_Processor | Select-Object -First 1).Name
-        $gpu  = ((Get-CimInstance Win32_VideoController) | Where-Object { $_.Name -notmatch 'Virtual|Basic' } | ForEach-Object Name) -join ', '
-        $ram  = [Math]::Round(((Get-CimInstance Win32_PhysicalMemory | Measure-Object Capacity -Sum).Sum / 1GB), 0)
-        $mb   = Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer, Product
-        $disks = (Get-CimInstance Win32_DiskDrive | ForEach-Object { "$($_.Model) ($([Math]::Round($_.Size/1GB,0)) GB)" }) -join "`n             "
-        $sb = New-Object Text.StringBuilder
-        [void]$sb.AppendLine("PC Build Validation Report")
-        [void]$sb.AppendLine("Generated:   $(Get-Date -Format 'yyyy-MM-dd HH:mm')")
-        [void]$sb.AppendLine("Hostname:    $env:COMPUTERNAME")
-        [void]$sb.AppendLine("")
-        [void]$sb.AppendLine("SYSTEM")
-        [void]$sb.AppendLine("  CPU:         $cpu")
-        [void]$sb.AppendLine("  GPU:         $gpu")
-        [void]$sb.AppendLine("  RAM:         ${ram} GB")
-        [void]$sb.AppendLine("  Motherboard: $($mb.Manufacturer) $($mb.Product)")
-        [void]$sb.AppendLine("  Storage:     $disks")
-        [void]$sb.AppendLine("")
-        [void]$sb.AppendLine("ACTIONS ($($sync.Mode.ToUpper()))")
-        foreach ($r in $sync.RunResults) {
-            [void]$sb.AppendLine(("  [{0,-4}] {1,-22} {2,-10} {3}" -f $r.Status, $r.App, $r.Action, $r.Detail))
-        }
-        [void]$sb.AppendLine("")
-        [void]$sb.AppendLine("Full log: $($sync.LogPath)")
-        $desk = [Environment]::GetFolderPath('Desktop')
-        $fn   = "PCBT_Report_{0}_{1}.txt" -f $env:COMPUTERNAME, (Get-Date -Format 'yyyyMMdd_HHmm')
-        $path = Join-Path $desk $fn
-        Set-Content -Path $path -Value $sb.ToString() -Encoding UTF8
-        Write-UiLog "Bench report saved: $path" 'OK'
-    } catch { Write-UiLog "Report generation failed: $_" 'WARN' }
-}
 
 try {
     # BREADCRUMB 1: did the runspace even start?
@@ -1879,7 +1945,6 @@ try {
         Set-UiStatus "Install complete."
         Set-UiProgress 100
         Write-UiLog "=============== INSTALL RUN COMPLETE =============="
-        if ($sync.GenerateReport) { New-BenchReport }
     }
     elseif ($mode -eq 'Uninstall') {
         Write-UiLog "=============== UNINSTALL RUN STARTED ============="
@@ -1899,7 +1964,6 @@ try {
         Set-UiStatus "Uninstall complete."
         Set-UiProgress 100
         Write-UiLog "=============== UNINSTALL RUN COMPLETE ============"
-        if ($sync.GenerateReport) { New-BenchReport }
     }
     # Clean up cached 7-Zip at pipeline end unless debugging
     if (-not $sync.KeepTemp -and $sync.SevenZipPath -and (Test-Path $sync.SevenZipPath)) {
@@ -1911,15 +1975,16 @@ finally { Set-UiBusy $false }
 '@
 
 function Start-Pipeline {
-    param([string]$Mode, [array]$SelectedApps, [hashtable]$SelectedTweaks, [hashtable]$SelectedOpts, [bool]$GenerateReport, [bool]$KeepTemp)
+    param([string]$Mode, [array]$SelectedApps, [hashtable]$SelectedTweaks, [hashtable]$SelectedOpts, [bool]$KeepTemp)
     Remove-Item "$env:TEMP\pcbt-pipeline-trace.log" -ErrorAction SilentlyContinue
     $sync.RunSummary.Visibility = 'Collapsed'
     $sync.RunSummary.Text       = ''
+    $sync.ReportActions.Children.Clear()
+    $sync.ReportFooter.Text = "Mode: $Mode  ·  Started: $(Get-Date -Format 'HH:mm:ss')  ·  Log: $($sync.LogPath)"
     $sync.Mode           = $Mode
     $sync.SelectedApps   = $SelectedApps
     $sync.SelectedTweaks = $SelectedTweaks
     $sync.SelectedOpts   = $SelectedOpts
-    $sync.GenerateReport = $GenerateReport
     $sync.KeepTemp       = $KeepTemp
     Write-Log "Starting $Mode pipeline..."
     $rs = [RunspaceFactory]::CreateRunspace()
@@ -2002,6 +2067,37 @@ function Start-Pipeline {
 
 $controls.BtnQuit.Add_Click({ $window.Close() })
 $controls.BtnClearLog.Add_Click({ $controls.LogOutput.Children.Clear() })
+
+function Show-View {
+    param([string]$View)
+    switch ($View) {
+        'Deploy' {
+            $controls.DeployTop.Visibility   = 'Visible'
+            $controls.LogConsole.Visibility  = 'Visible'
+            $controls.ReportPanel.Visibility = 'Collapsed'
+            $controls.BodyGrid.RowDefinitions[0].Height = New-Object System.Windows.GridLength(1, 'Star')
+            $controls.BodyGrid.RowDefinitions[1].Height = New-Object System.Windows.GridLength(220)
+            $controls.HeadTitle.Text = 'Deploy new bench run'
+        }
+        'Report' {
+            $controls.DeployTop.Visibility   = 'Collapsed'
+            $controls.LogConsole.Visibility  = 'Collapsed'
+            $controls.ReportPanel.Visibility = 'Visible'
+            $controls.HeadTitle.Text = 'Report'
+        }
+        'Logs' {
+            $controls.DeployTop.Visibility   = 'Collapsed'
+            $controls.LogConsole.Visibility  = 'Visible'
+            $controls.ReportPanel.Visibility = 'Collapsed'
+            $controls.BodyGrid.RowDefinitions[0].Height = New-Object System.Windows.GridLength(0)
+            $controls.BodyGrid.RowDefinitions[1].Height = New-Object System.Windows.GridLength(1, 'Star')
+            $controls.HeadTitle.Text = 'Logs'
+        }
+    }
+}
+$controls.NavDeploy.Add_Checked({ Show-View 'Deploy' })
+$controls.NavReport.Add_Checked({ Show-View 'Report' })
+$controls.NavLogs.Add_Checked({   Show-View 'Logs'   })
 $controls.BtnSelectAllApps.Add_Click({
     $visible   = @($appCheckboxes.Values | Where-Object { $_.Visibility -eq 'Visible' })
     $anyUnchecked = $visible | Where-Object { -not $_.IsChecked }
@@ -2039,9 +2135,8 @@ $controls.BtnRun.Add_Click({
         return
     }
     Start-Pipeline -Mode 'Install' -SelectedApps $selectedApps -SelectedTweaks $selectedTweaks `
-                   -SelectedOpts   $selectedOpts `
-                   -GenerateReport ([bool]$controls.OptBenchReport.IsChecked) `
-                   -KeepTemp       ([bool]$controls.OptKeepTemp.IsChecked)
+                   -SelectedOpts $selectedOpts `
+                   -KeepTemp     ([bool]$controls.OptKeepTemp.IsChecked)
 })
 
 $controls.BtnUninstall.Add_Click({
@@ -2050,8 +2145,7 @@ $controls.BtnUninstall.Add_Click({
         'Confirm uninstall', 'YesNo', 'Warning')
     if ($r -ne [System.Windows.MessageBoxResult]::Yes) { return }
     Start-Pipeline -Mode 'Uninstall' -SelectedApps $script:AppCatalog -SelectedTweaks @{} -SelectedOpts @{} `
-                   -GenerateReport ([bool]$controls.OptBenchReport.IsChecked) `
-                   -KeepTemp       ([bool]$controls.OptKeepTemp.IsChecked)
+                   -KeepTemp ([bool]$controls.OptKeepTemp.IsChecked)
 })
 
 Write-Log "PC Build Toolkit $SCRIPT_VERSION ready. Log: $($sync.LogPath)"
