@@ -884,11 +884,9 @@ try {
         $controls.StatusDiskDot.Fill = New-Object System.Windows.Media.SolidColorBrush(
             [System.Windows.Media.ColorConverter]::ConvertFromString($diskColor))
     }
-    # winget health quick check
-    try {
-        $null = & winget source list 2>&1
-        $wgOk = $LASTEXITCODE -eq 0
-    } catch { $wgOk = $false }
+    # winget health quick check (existence only — avoids triggering a source-cache refresh
+    # that can lock the source DB and cause -1978335138 failures in the install pipeline)
+    $wgOk = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
     $wgColor = if ($wgOk) { '#8AE06B' } else { '#E07A6B' }
     $controls.StatusWingetDot.Fill = New-Object System.Windows.Media.SolidColorBrush(
         [System.Windows.Media.ColorConverter]::ConvertFromString($wgColor))
@@ -1363,6 +1361,8 @@ function Invoke-WingetInstall { param($App)
         0           { Write-UiLog "$($App.Name) installed." 'OK';                   Add-Result $App.Name 'install' 'OK' }
         -1978335189 { Write-UiLog "$($App.Name) already installed." 'OK';            Add-Result $App.Name 'install' 'OK' 'already installed' }
         -1978335212 { Write-UiLog "$($App.Name) - id not in winget." 'ERROR';        Add-Result $App.Name 'install' 'FAIL' 'id not found' }
+        -1978335138 { Write-UiLog "$($App.Name) - winget source error (try: winget source reset --force)." 'ERROR'
+                      Add-Result $App.Name 'install' 'FAIL' 'source error 0x8A15005E' }
         default     { Write-UiLog "$($App.Name) exit $($p.ExitCode)." 'WARN';        Add-Result $App.Name 'install' 'WARN' "exit $($p.ExitCode)" }
     }
 }
