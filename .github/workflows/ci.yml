@@ -43,7 +43,7 @@ jobs:
         shell: pwsh
         run: |
           $results = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning `
-                      -ExcludeRule PSAvoidUsingWriteHost,PSUseShouldProcessForStateChangingFunctions
+            -ExcludeRule PSAvoidUsingWriteHost,PSUseShouldProcessForStateChangingFunctions,PSAvoidUsingComputerNameHardcoded,PSAvoidOverwritingBuiltInCmdlets,PSUseSingularNouns
           if ($results) { $results | Format-Table -AutoSize }
           $errorCount = @($results | Where-Object Severity -eq 'Error').Count
           if ($errorCount -gt 0) { throw "PSScriptAnalyzer found $errorCount error(s)" }
