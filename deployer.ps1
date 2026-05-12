@@ -10,7 +10,7 @@
 #  Launch from web: irm https://fay.digital/pbt | iex
 # =============================================================================
 
-$SCRIPT_VERSION = 'v1.1.0'
+$SCRIPT_VERSION = 'v1.1.1'
 $SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/fay-digital/pc-build-toolkit/main/deployer.ps1'
 
 # Standalone 7-Zip console binary (7zr.exe handles .7z; 7za.exe handles .zip
@@ -35,8 +35,8 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
 # --- App catalog -------------------------------------------------------------
 $script:AppCatalog = @(
-    @{ Id='FinalWire.AIDA64.Extreme';        Name='AIDA64 Extreme';  Category='Diagnostics'; Source='winget' }
-    @{ Id='REALiX.HWiNFO';                   Name='HWiNFO';          Category='Diagnostics'; Source='winget' }
+    @{ Id='aida64-extreme'; Name='AIDA64 Extreme';  Category='Diagnostics'; Source='choco' }
+    @{ Id='hwinfo';         Name='HWiNFO';          Category='Diagnostics'; Source='choco' }
     @{ Id='CrystalDewWorld.CrystalDiskMark'; Name='CrystalDiskMark'; Category='Benchmark';   Source='winget' }
     @{ Id='Maxon.CinebenchR23';              Name='Cinebench R23';   Category='Benchmark';   Source='winget' }
     @{ Id='3dmark-bundled';                  Name='3DMark (Steel Nomad)'; Category='Benchmark'; Source='zip'
@@ -52,7 +52,7 @@ $script:AppCatalog = @(
 )
 
 $script:DefaultChecked = @(
-    'FinalWire.AIDA64.Extreme','REALiX.HWiNFO','CrystalDewWorld.CrystalDiskMark',
+    'aida64-extreme','hwinfo','CrystalDewWorld.CrystalDiskMark',
     'Maxon.CinebenchR23','3dmark-bundled'
 )
 
@@ -1081,23 +1081,7 @@ function Invoke-PreflightChecks {
     return $true
 }
 
-function Invoke-SelfUpdateCheck {
-    if (-not $PSCommandPath -or -not (Test-Path $PSCommandPath)) {
-        Write-Log "Loaded from web stream; skipping self-update check."; return
-    }
-    try {
-        $local  = Get-FileHash -Path $PSCommandPath -Algorithm SHA256
-        $remote = Invoke-WebRequest -UseBasicParsing -Uri $SCRIPT_RAW_URL -TimeoutSec 10
-        $bytes  = [System.Text.Encoding]::UTF8.GetBytes($remote.Content)
-        $sha    = [System.Security.Cryptography.SHA256]::Create()
-        $rHash  = -join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') })
-        if ($local.Hash.ToLower() -ne $rHash.ToLower()) {
-            Write-Log "A newer version is available at $SCRIPT_RAW_URL" 'INFO'
-            $controls.UpdateBanner.Text       = "Update available — run  irm fay.digital/pbt | iex  to get the latest version"
-            $controls.UpdateBanner.Visibility = 'Visible'
-        } else { Write-Log "Running latest version ($SCRIPT_VERSION)." 'OK' }
-    } catch { Write-Log "Self-update check skipped: $_" 'WARN' }
-}
+
 
 $pipelineCode = @'
 function Write-UiLog {
@@ -1346,11 +1330,20 @@ function Test-ChocoInstalled { [bool](Get-Command choco.exe -ErrorAction Silentl
 function Install-Chocolatey {
     Write-UiLog "Chocolatey not found. Installing..."
     Set-UiStatus "Installing Chocolatey..."
-    Set-ExecutionPolicy Bypass -Scope Process -Force
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
-    Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
-                [System.Environment]::GetEnvironmentVariable("Path","User")
+    $chocoScript = Join-Path $env:TEMP 'pbt_choco_install.ps1'
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri 'https://community.chocolatey.org/install.ps1' `
+            -OutFile $chocoScript -TimeoutSec 60 -ErrorAction Stop
+        $p = Start-Process powershell.exe `
+            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$chocoScript`"") `
+            -Wait -PassThru -NoNewWindow
+        if ($p.ExitCode -ne 0) { throw "Chocolatey installer exited $($p.ExitCode)." }
+    } finally {
+        Remove-Item $chocoScript -Force -ErrorAction SilentlyContinue
+    }
+    $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+                [System.Environment]::GetEnvironmentVariable('Path', 'User')
     if (-not (Test-ChocoInstalled)) { throw "Chocolatey install did not expose choco.exe." }
     Write-UiLog "Chocolatey installed." 'OK'
 }
@@ -1451,10 +1444,15 @@ function Invoke-RegistryUninstall { param($App)
         Get-ChildItem $k -ErrorAction SilentlyContinue | ForEach-Object {
             $dn = $_.GetValue('DisplayName')
             if ($dn -and $dn -like "*$match*") {
-                $us = $_.GetValue('QuietUninstallString'); if (-not $us) { $us = $_.GetValue('UninstallString') }
+                $us = $_.GetValue('QuietUninstallString')
+                $alreadyQuiet = [bool]$us
+                if (-not $us) { $us = $_.GetValue('UninstallString') }
                 if ($us) {
+                    $cmd = if ($alreadyQuiet)             { $us }
+                           elseif ($us -match 'msiexec')  { "$us /quiet /norestart" }
+                           else                           { "$us /S" }
                     Write-UiLog "Uninstalling '$dn'..."
-                    Start-Process -FilePath cmd.exe -ArgumentList "/c",($us + " /S") -Wait -NoNewWindow
+                    Start-Process -FilePath cmd.exe -ArgumentList '/c', $cmd -Wait -NoNewWindow
                     Write-UiLog "$dn uninstalled." 'OK'; Add-Result $App.Name 'uninstall' 'OK' $dn; $found = $true
                 }
             }
@@ -1587,7 +1585,14 @@ function Get-AdrenalinDownloadUrl {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
         $html = (Invoke-WebRequest -UseBasicParsing -Uri $driversPage -TimeoutSec 30 -UserAgent 'Mozilla/5.0').Content
         $matches = [regex]::Matches($html, 'https://[^"'']*?adrenalin[^"'']*?\.exe', 'IgnoreCase')
-        if ($matches.Count -gt 0) { return $matches[0].Value }
+        if ($matches.Count -gt 0) {
+            $url = $matches[0].Value
+            if ($url -notmatch '^https://[a-z0-9\-]+\.amd\.com/') {
+                Write-UiLog "Adrenalin URL failed domain check: $url" 'WARN'
+                return $null
+            }
+            return $url
+        }
     } catch { Write-UiLog "Adrenalin page scrape failed: $_" 'WARN' }
     return $null
 }
@@ -1601,7 +1606,15 @@ function Get-NvidiaAppDownloadUrl {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
         $html = (Invoke-WebRequest -UseBasicParsing -Uri $page -TimeoutSec 30 -UserAgent 'Mozilla/5.0').Content
         $matches = [regex]::Matches($html, 'https://[^"'']*?NVIDIA_app[^"'']*?\.exe', 'IgnoreCase')
-        if ($matches.Count -gt 0) { return $matches[0].Value }
+        if ($matches.Count -gt 0) {
+            $url = $matches[0].Value
+            if ($url -notmatch '^https://[a-z]+\.download\.nvidia\.com/' -and
+                $url -notmatch '^https://[a-z]+\.nvidia\.com/') {
+                Write-UiLog "NVIDIA URL failed domain check: $url" 'WARN'
+                return $null
+            }
+            return $url
+        }
     } catch { Write-UiLog "NVIDIA App page scrape failed: $_" 'WARN' }
     return $null
 }
@@ -1915,6 +1928,11 @@ function Start-Pipeline {
     Remove-Item "$env:TEMP\pcbt-pipeline-trace.log" -ErrorAction SilentlyContinue
     $sync.RunSummary.Visibility = 'Collapsed'
     $sync.RunSummary.Text       = ''
+    # Disable buttons immediately on the UI thread to prevent double-submission
+    # before the runspace has a chance to call Set-UiBusy.
+    $sync.BtnRun.IsEnabled    = $false
+    $sync.BtnUninst.IsEnabled = $false
+    $sync.BtnQuit.IsEnabled   = $false
     $sync.Mode           = $Mode
     $sync.SelectedApps   = $SelectedApps
     $sync.SelectedTweaks = $SelectedTweaks
@@ -2010,6 +2028,7 @@ $controls.BtnSelectAllApps.Add_Click({
 })
 
 $controls.BtnRun.Add_Click({
+    if ($sync.PipelineTimer) { return }
     $selectedApps = @()
     foreach ($app in $script:AppCatalog) {
         if ($appCheckboxes[$app.Id].IsChecked) { $selectedApps += $app }
@@ -2034,6 +2053,16 @@ $controls.BtnRun.Add_Click({
         [System.Windows.MessageBox]::Show('Select at least one app, tweak, or option.','Nothing to do','OK','Information') | Out-Null
         return
     }
+    if ($selectedTweaks.ClearBrowser) {
+        $runningBrowsers = @('msedge','chrome','firefox','brave','opera','vivaldi','iexplore') |
+            Where-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue }
+        if ($runningBrowsers) {
+            $r = [System.Windows.MessageBox]::Show(
+                "Clear Browser Data will force-close:`n$($runningBrowsers -join ', ')`n`nUnsaved work (open tabs, forms) will be lost. Continue?",
+                'Browsers will be closed', 'OKCancel', 'Warning')
+            if ($r -ne [System.Windows.MessageBoxResult]::OK) { return }
+        }
+    }
     if (-not (Invoke-PreflightChecks)) {
         [System.Windows.MessageBox]::Show('Pre-flight checks failed. See log.','Cannot run','OK','Error') | Out-Null
         return
@@ -2045,6 +2074,7 @@ $controls.BtnRun.Add_Click({
 })
 
 $controls.BtnUninstall.Add_Click({
+    if ($sync.PipelineTimer) { return }
     $r = [System.Windows.MessageBox]::Show(
         "Uninstall every app in the catalog that is currently installed?`n`nApps not present will be skipped.",
         'Confirm uninstall', 'YesNo', 'Warning')
@@ -2055,6 +2085,40 @@ $controls.BtnUninstall.Add_Click({
 })
 
 Write-Log "PC Build Toolkit $SCRIPT_VERSION ready. Log: $($sync.LogPath)"
-Invoke-SelfUpdateCheck
+
+# Run the self-update check in a background runspace so it never delays the window.
+# $sync.UpdateBanner is already populated (line 909) and safe to access via Dispatcher.
+$window.Add_Loaded({
+    if (-not $PSCommandPath -or -not (Test-Path $PSCommandPath)) { return }
+    $updatePath   = $PSCommandPath
+    $updateRawUrl = $SCRIPT_RAW_URL
+    $rs2 = [RunspaceFactory]::CreateRunspace()
+    $rs2.ApartmentState = 'STA'
+    $rs2.ThreadOptions  = 'ReuseThread'
+    $rs2.Open()
+    $rs2.SessionStateProxy.SetVariable('sync',          $sync)
+    $rs2.SessionStateProxy.SetVariable('updatePath',    $updatePath)
+    $rs2.SessionStateProxy.SetVariable('updateRawUrl',  $updateRawUrl)
+    $ps2 = [PowerShell]::Create()
+    $ps2.Runspace = $rs2
+    [void]$ps2.AddScript({
+        try {
+            $local  = (Get-FileHash -Path $updatePath -Algorithm SHA256).Hash.ToLower()
+            $wc     = New-Object System.Net.WebClient
+            $bytes  = $wc.DownloadData($updateRawUrl)
+            $sha    = [System.Security.Cryptography.SHA256]::Create()
+            $rHash  = -join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') })
+            if ($local -ne $rHash) {
+                $sync.UpdateBanner.Dispatcher.Invoke([action]{
+                    $sync.UpdateBanner.Text       = "Update available — run  irm fay.digital/pbt | iex  to get the latest version"
+                    $sync.UpdateBanner.Visibility = 'Visible'
+                })
+            }
+        } catch { } # update check is best-effort; never surface errors to the user
+    })
+    [void]$ps2.BeginInvoke()
+    # fire-and-forget: $ps2/$rs2 are intentionally not tracked — they are GC'd after
+    # the check completes and the runspace thread exits naturally.
+})
 
 $window.ShowDialog() | Out-Null
