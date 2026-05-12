@@ -35,8 +35,8 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
 # --- App catalog -------------------------------------------------------------
 $script:AppCatalog = @(
-    @{ Id='FinalWire.AIDA64.Extreme';        Name='AIDA64 Extreme';  Category='Diagnostics'; Source='winget' }
-    @{ Id='REALiX.HWiNFO';                   Name='HWiNFO';          Category='Diagnostics'; Source='winget' }
+    @{ Id='aida64-extreme'; Name='AIDA64 Extreme';  Category='Diagnostics'; Source='choco' }
+    @{ Id='hwinfo';         Name='HWiNFO';          Category='Diagnostics'; Source='choco' }
     @{ Id='CrystalDewWorld.CrystalDiskMark'; Name='CrystalDiskMark'; Category='Benchmark';   Source='winget' }
     @{ Id='Maxon.CinebenchR23';              Name='Cinebench R23';   Category='Benchmark';   Source='winget' }
     @{ Id='3dmark-bundled';                  Name='3DMark (Steel Nomad)'; Category='Benchmark'; Source='zip'
@@ -52,7 +52,7 @@ $script:AppCatalog = @(
 )
 
 $script:DefaultChecked = @(
-    'FinalWire.AIDA64.Extreme','REALiX.HWiNFO','CrystalDewWorld.CrystalDiskMark',
+    'aida64-extreme','hwinfo','CrystalDewWorld.CrystalDiskMark',
     'Maxon.CinebenchR23','3dmark-bundled'
 )
 
