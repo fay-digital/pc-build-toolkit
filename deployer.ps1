@@ -10,7 +10,7 @@
 #  Launch from web: irm https://fay.digital/pbt | iex
 # =============================================================================
 
-$SCRIPT_VERSION = 'v1.1.1'
+$SCRIPT_VERSION = 'v1.2.0'
 $SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/fay-digital/pc-build-toolkit/main/deployer.ps1'
 
 # Standalone 7-Zip console binary (7zr.exe handles .7z; 7za.exe handles .zip
@@ -594,13 +594,11 @@ $script:BloatList = @(
                     <!-- Nav -->
                     <StackPanel Grid.Row="1" Margin="10,12,10,0">
                         <TextBlock Text="WORKSPACE" Foreground="{StaticResource TextDim}" FontFamily="{StaticResource Mono}" FontSize="10" Margin="10,4,0,6"/>
-                        <RadioButton x:Name="NavDeploy"  Style="{StaticResource NavItem}" IsChecked="True" GroupName="Nav" Content="Deploy"
+                        <RadioButton x:Name="NavDeploy"   Style="{StaticResource NavItem}" IsChecked="True" GroupName="Nav" Content="Deploy"
                             Tag="M4,3 L13,3 L13,13 L4,13 Z M4,6 L13,6 M7,9 L10,9"/>
-                        <RadioButton x:Name="NavTweaks"  Style="{StaticResource NavItem}" GroupName="Nav" Content="System tweaks"
-                            Tag="M8,6 A2,2 0 1 1 7.99,6 M8,1.5 L8,3.5 M8,12.5 L8,14.5 M14.5,8 L12.5,8 M3.5,8 L1.5,8 M12.6,3.4 L11.2,4.8 M4.8,11.2 L3.4,12.6 M12.6,12.6 L11.2,11.2 M4.8,4.8 L3.4,3.4"/>
-                        <RadioButton x:Name="NavDrivers" Style="{StaticResource NavItem}" GroupName="Nav" Content="Drivers &amp; updates"
-                            Tag="M8,2 L8,10 M5,7 L8,10 L11,7 M3,13 L13,13"/>
-                        <RadioButton x:Name="NavLogs"    Style="{StaticResource NavItem}" GroupName="Nav" Content="Logs"
+                        <RadioButton x:Name="NavRunState" Style="{StaticResource NavItem}" GroupName="Nav" Content="Run state"
+                            Tag="M4,2 L12,2 L12,14 L4,14 Z M6,5 L10,5 M6,8 L10,8 M6,11 L10,11"/>
+                        <RadioButton x:Name="NavLogs"     Style="{StaticResource NavItem}" GroupName="Nav" Content="Logs"
                             Tag="M3,4 L13,4 M3,8 L13,8 M3,12 L13,12"/>
 
                         <TextBlock Text="MACHINE" Foreground="{StaticResource TextDim}" FontFamily="{StaticResource Mono}" FontSize="10" Margin="10,18,0,6"/>
@@ -663,18 +661,20 @@ $script:BloatList = @(
                     </StackPanel>
                 </Border>
 
-                <!-- Content: two cards side by side + console below -->
+                <!-- Content: 3-view container (Deploy / Run state / Logs). Only one Border is visible at a time. -->
                 <Grid Grid.Row="1" Margin="22,14,22,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*"/>
-                        <RowDefinition Height="220"/>
-                    </Grid.RowDefinitions>
+                    <Border x:Name="DeployView">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="220"/>
+                            </Grid.RowDefinitions>
 
-                    <!-- Applications card -->
+                            <!-- Applications card -->
                     <Border Grid.Column="0" Grid.Row="0" Background="{StaticResource BgPanel}" CornerRadius="8"
                             BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="16,14" Margin="0,0,7,0">
                         <Grid>
@@ -747,7 +747,6 @@ $script:BloatList = @(
                                 <CheckBox x:Name="TweakRemoveBloat"      Style="{StaticResource ToggleSwitchDestructive}" Content="Remove Windows bloat"        Tag="17 AppX packages + Quick Assist removed per-user (irreversible)"/>
 
                                 <TextBlock Text="OUTPUT" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextDim}" Margin="4,14,0,4"/>
-                                <CheckBox x:Name="OptBenchReport" Style="{StaticResource ToggleSwitch}" Content="Generate bench report" Tag="Writes summary .txt to Desktop after run" IsChecked="True"/>
                                 <CheckBox x:Name="OptKeepTemp"    Style="{StaticResource ToggleSwitch}" Content="Keep temp files"      Tag="Retains downloads and extracted archives for debug"/>
                             </StackPanel>
                         </ScrollViewer>
@@ -780,6 +779,83 @@ $script:BloatList = @(
                             <ScrollViewer x:Name="LogScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="14,10">
                                 <StackPanel x:Name="LogOutput"/>
                             </ScrollViewer>
+                        </Grid>
+                    </Border>
+                        </Grid>
+                    </Border>
+
+                    <!-- RunStateView: live results table, full content area -->
+                    <Border x:Name="RunStateView" Visibility="Collapsed"
+                            Background="{StaticResource BgPanel}" CornerRadius="8"
+                            BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="16,14">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0" Margin="4,0,4,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="RUN STATE" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextMid}"/>
+                                <TextBlock Grid.Column="1" Text="live results from the current and most recent pipeline" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextMuted}"/>
+                            </Grid>
+                            <ListView x:Name="RunStateList" Grid.Row="1" Background="Transparent" BorderThickness="0"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListView.View>
+                                    <GridView>
+                                        <GridViewColumn Header="App"    Width="240" DisplayMemberBinding="{Binding App}"/>
+                                        <GridViewColumn Header="Action" Width="110" DisplayMemberBinding="{Binding Action}"/>
+                                        <GridViewColumn Header="Status" Width="80">
+                                            <GridViewColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Status}" FontFamily="{StaticResource Mono}" FontWeight="SemiBold">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Status}" Value="OK">
+                                                                        <Setter Property="Foreground" Value="{StaticResource Lime}"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding Status}" Value="WARN">
+                                                                        <Setter Property="Foreground" Value="{StaticResource Amber}"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding Status}" Value="FAIL">
+                                                                        <Setter Property="Foreground" Value="{StaticResource Rose}"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </DataTemplate>
+                                            </GridViewColumn.CellTemplate>
+                                        </GridViewColumn>
+                                        <GridViewColumn Header="Detail" Width="520" DisplayMemberBinding="{Binding Detail}"/>
+                                    </GridView>
+                                </ListView.View>
+                            </ListView>
+                        </Grid>
+                    </Border>
+
+                    <!-- LogsView: full-screen log scroll. LogOutput is reparented here when active. -->
+                    <Border x:Name="LogsView" Visibility="Collapsed"
+                            Background="#0B0E14" CornerRadius="8"
+                            BorderBrush="{StaticResource Line}" BorderThickness="1">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0" Background="#10141C" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="14,10">
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse Width="8" Height="8" Fill="#E07A6B" Margin="0,0,5,0"/>
+                                    <Ellipse Width="8" Height="8" Fill="#E0B15B" Margin="0,0,5,0"/>
+                                    <Ellipse Width="8" Height="8" Fill="#8AE06B" Margin="0,0,14,0"/>
+                                    <TextBlock Text="LOG (full screen)" FontFamily="{StaticResource Mono}" FontSize="10.5" Foreground="{StaticResource TextHi}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Border>
+                            <ScrollViewer x:Name="LogScrollFull" Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="14,10"/>
                         </Grid>
                     </Border>
                 </Grid>
@@ -851,7 +927,9 @@ foreach ($n in 'AppPanel','LogOutput','LogScroll','BtnRun','BtnQuit','BtnUninsta
                'ChipAll','ChipDiag','ChipBench','ChipGpu','ChipStab','ChipInfo','ChipCpu',
                'TweakPowerNever','TweakDisableHibernate','TweakClearDownloads',
                'TweakEmptyRecycle','TweakClearBrowser','TweakStartGrid','TweakRemoveBloat',
-               'OptGpuDriver','OptWindowsUpdate','OptBenchReport','OptKeepTemp') {
+               'OptGpuDriver','OptWindowsUpdate','OptKeepTemp',
+               'NavDeploy','NavRunState','NavLogs',
+               'DeployView','RunStateView','LogsView','LogScrollFull','RunStateList') {
     $controls[$n] = $window.FindName($n)
 }
 $controls.VersionLabel.Text = $SCRIPT_VERSION
@@ -907,6 +985,7 @@ $sync.BtnUninst      = $controls.BtnUninstall
 $sync.BtnQuit        = $controls.BtnQuit
 $sync.RunSummary     = $controls.RunSummary
 $sync.UpdateBanner   = $controls.UpdateBanner
+$sync.RunStateList   = $controls.RunStateList
 $sync.LogPath        = Join-Path $env:TEMP 'pcbt.log'
 $controls.LogPathLabel.Text = "   streaming to $($sync.LogPath)"
 $sync.AppCatalog     = $script:AppCatalog
@@ -916,7 +995,6 @@ $sync.Mode           = $null
 $sync.SelectedApps   = @()
 $sync.SelectedTweaks = @{}
 $sync.SelectedOpts   = @{}
-$sync.GenerateReport = $true
 $sync.KeepTemp       = $false
 $sync.RunResults     = @()
 
@@ -1144,7 +1222,12 @@ function Set-UiBusy {
     })
 }
 function Add-Result { param($Name, $Action, $Status, $Detail='')
-    $sync.RunResults += [pscustomobject]@{ App=$Name; Action=$Action; Status=$Status; Detail=$Detail }
+    $row = [pscustomobject]@{ App=$Name; Action=$Action; Status=$Status; Detail=$Detail }
+    $sync.RunResults += $row
+    # Mirror the row into the Run State ListView so the user sees live results
+    # while a pipeline is running. The ListView lives on the UI thread, so we
+    # need Dispatcher.Invoke to add items from this runspace.
+    $sync.RunStateList.Dispatcher.Invoke([action]{ [void]$sync.RunStateList.Items.Add($row) })
 }
 
 function Invoke-StreamingDownload {
@@ -1789,39 +1872,6 @@ function Invoke-TweakClearBrowser {
     }
 }
 
-function New-BenchReport {
-    try {
-        $cpu  = (Get-CimInstance Win32_Processor | Select-Object -First 1).Name
-        $gpu  = ((Get-CimInstance Win32_VideoController) | Where-Object { $_.Name -notmatch 'Virtual|Basic' } | ForEach-Object Name) -join ', '
-        $ram  = [Math]::Round(((Get-CimInstance Win32_PhysicalMemory | Measure-Object Capacity -Sum).Sum / 1GB), 0)
-        $mb   = Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer, Product
-        $disks = (Get-CimInstance Win32_DiskDrive | ForEach-Object { "$($_.Model) ($([Math]::Round($_.Size/1GB,0)) GB)" }) -join "`n             "
-        $sb = New-Object Text.StringBuilder
-        [void]$sb.AppendLine("PC Build Validation Report")
-        [void]$sb.AppendLine("Generated:   $(Get-Date -Format 'yyyy-MM-dd HH:mm')")
-        [void]$sb.AppendLine("Hostname:    $env:COMPUTERNAME")
-        [void]$sb.AppendLine("")
-        [void]$sb.AppendLine("SYSTEM")
-        [void]$sb.AppendLine("  CPU:         $cpu")
-        [void]$sb.AppendLine("  GPU:         $gpu")
-        [void]$sb.AppendLine("  RAM:         ${ram} GB")
-        [void]$sb.AppendLine("  Motherboard: $($mb.Manufacturer) $($mb.Product)")
-        [void]$sb.AppendLine("  Storage:     $disks")
-        [void]$sb.AppendLine("")
-        [void]$sb.AppendLine("ACTIONS ($($sync.Mode.ToUpper()))")
-        foreach ($r in $sync.RunResults) {
-            [void]$sb.AppendLine(("  [{0,-4}] {1,-22} {2,-10} {3}" -f $r.Status, $r.App, $r.Action, $r.Detail))
-        }
-        [void]$sb.AppendLine("")
-        [void]$sb.AppendLine("Full log: $($sync.LogPath)")
-        $desk = [Environment]::GetFolderPath('Desktop')
-        $fn   = "PCBT_Report_{0}_{1}.txt" -f $env:COMPUTERNAME, (Get-Date -Format 'yyyyMMdd_HHmm')
-        $path = Join-Path $desk $fn
-        Set-Content -Path $path -Value $sb.ToString() -Encoding UTF8
-        Write-UiLog "Bench report saved: $path" 'OK'
-    } catch { Write-UiLog "Report generation failed: $_" 'WARN' }
-}
-
 try {
     # BREADCRUMB 1: did the runspace even start?
     Add-Content -Path "$env:TEMP\pcbt-pipeline-trace.log" -Value "[$(Get-Date -Format 'HH:mm:ss.fff')] runspace entered" -ErrorAction SilentlyContinue
@@ -1830,6 +1880,7 @@ try {
     Set-UiProgress 0
     Add-Content -Path "$env:TEMP\pcbt-pipeline-trace.log" -Value "[$(Get-Date -Format 'HH:mm:ss.fff')] Set-UiProgress returned" -ErrorAction SilentlyContinue
     $sync.RunResults = @()
+    $sync.RunStateList.Dispatcher.Invoke([action]{ $sync.RunStateList.Items.Clear() })
     $apps   = @($sync.SelectedApps)
     $tweaks = $sync.SelectedTweaks
     $opts   = $sync.SelectedOpts
@@ -1892,7 +1943,6 @@ try {
         Set-UiStatus "Install complete."
         Set-UiProgress 100
         Write-UiLog "=============== INSTALL RUN COMPLETE =============="
-        if ($sync.GenerateReport) { New-BenchReport }
     }
     elseif ($mode -eq 'Uninstall') {
         Write-UiLog "=============== UNINSTALL RUN STARTED ============="
@@ -1912,7 +1962,6 @@ try {
         Set-UiStatus "Uninstall complete."
         Set-UiProgress 100
         Write-UiLog "=============== UNINSTALL RUN COMPLETE ============"
-        if ($sync.GenerateReport) { New-BenchReport }
     }
     # Clean up cached 7-Zip at pipeline end unless debugging
     if (-not $sync.KeepTemp -and $sync.SevenZipPath -and (Test-Path $sync.SevenZipPath)) {
@@ -1924,7 +1973,7 @@ finally { Set-UiBusy $false }
 '@
 
 function Start-Pipeline {
-    param([string]$Mode, [array]$SelectedApps, [hashtable]$SelectedTweaks, [hashtable]$SelectedOpts, [bool]$GenerateReport, [bool]$KeepTemp)
+    param([string]$Mode, [array]$SelectedApps, [hashtable]$SelectedTweaks, [hashtable]$SelectedOpts, [bool]$KeepTemp)
     Remove-Item "$env:TEMP\pcbt-pipeline-trace.log" -ErrorAction SilentlyContinue
     $sync.RunSummary.Visibility = 'Collapsed'
     $sync.RunSummary.Text       = ''
@@ -1937,7 +1986,6 @@ function Start-Pipeline {
     $sync.SelectedApps   = $SelectedApps
     $sync.SelectedTweaks = $SelectedTweaks
     $sync.SelectedOpts   = $SelectedOpts
-    $sync.GenerateReport = $GenerateReport
     $sync.KeepTemp       = $KeepTemp
     Write-Log "Starting $Mode pipeline..."
     $rs = [RunspaceFactory]::CreateRunspace()
@@ -2020,6 +2068,30 @@ function Start-Pipeline {
 
 $controls.BtnQuit.Add_Click({ $window.Close() })
 $controls.BtnClearLog.Add_Click({ $controls.LogOutput.Children.Clear() })
+
+# --- View switching -----------------------------------------------------------
+# Three views share the main content area: Deploy (default), Run state, Logs.
+# We reparent the LogOutput StackPanel between the small console ScrollViewer
+# (in DeployView) and the full-screen ScrollViewer (in LogsView) so that log
+# lines flow into a single widget regardless of which view is active.
+$switchView = {
+    param([string]$Mode)  # 'Deploy' | 'RunState' | 'Logs'
+    $controls.DeployView.Visibility   = if ($Mode -eq 'Deploy')   { 'Visible' } else { 'Collapsed' }
+    $controls.RunStateView.Visibility = if ($Mode -eq 'RunState') { 'Visible' } else { 'Collapsed' }
+    $controls.LogsView.Visibility     = if ($Mode -eq 'Logs')     { 'Visible' } else { 'Collapsed' }
+
+    $current = $controls.LogOutput.Parent  # current ScrollViewer
+    $target  = if ($Mode -eq 'Logs') { $controls.LogScrollFull } else { $controls.LogScroll }
+    if ($current -ne $target) {
+        $current.Content = $null
+        $target.Content  = $controls.LogOutput
+        $target.Dispatcher.BeginInvoke([action]{ $target.ScrollToBottom() }, 'Background') | Out-Null
+    }
+}
+$controls.NavDeploy.Add_Checked(  { & $switchView 'Deploy'   })
+$controls.NavRunState.Add_Checked({ & $switchView 'RunState' })
+$controls.NavLogs.Add_Checked(    { & $switchView 'Logs'     })
+
 $controls.BtnSelectAllApps.Add_Click({
     $visible   = @($appCheckboxes.Values | Where-Object { $_.Visibility -eq 'Visible' })
     $anyUnchecked = $visible | Where-Object { -not $_.IsChecked }
@@ -2069,7 +2141,6 @@ $controls.BtnRun.Add_Click({
     }
     Start-Pipeline -Mode 'Install' -SelectedApps $selectedApps -SelectedTweaks $selectedTweaks `
                    -SelectedOpts   $selectedOpts `
-                   -GenerateReport ([bool]$controls.OptBenchReport.IsChecked) `
                    -KeepTemp       ([bool]$controls.OptKeepTemp.IsChecked)
 })
 
@@ -2080,7 +2151,6 @@ $controls.BtnUninstall.Add_Click({
         'Confirm uninstall', 'YesNo', 'Warning')
     if ($r -ne [System.Windows.MessageBoxResult]::Yes) { return }
     Start-Pipeline -Mode 'Uninstall' -SelectedApps $script:AppCatalog -SelectedTweaks @{} -SelectedOpts @{} `
-                   -GenerateReport ([bool]$controls.OptBenchReport.IsChecked) `
                    -KeepTemp       ([bool]$controls.OptKeepTemp.IsChecked)
 })
 
