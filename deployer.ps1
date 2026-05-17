@@ -10,7 +10,7 @@
 #  Launch from web: irm https://fay.digital/pbt | iex
 # =============================================================================
 
-$SCRIPT_VERSION = 'v1.2.0'
+$SCRIPT_VERSION = 'v1.2.1'
 $SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/fay-digital/pc-build-toolkit/main/deployer.ps1'
 
 # Standalone 7-Zip console binary (7zr.exe handles .7z; 7za.exe handles .zip
@@ -35,8 +35,8 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
 # --- App catalog -------------------------------------------------------------
 $script:AppCatalog = @(
-    @{ Id='aida64-extreme'; Name='AIDA64 Extreme';  Category='Diagnostics'; Source='choco' }
-    @{ Id='hwinfo';         Name='HWiNFO';          Category='Diagnostics'; Source='choco' }
+    @{ Id='FinalWire.AIDA64.Extreme'; Name='AIDA64 Extreme'; Category='Diagnostics'; Source='winget' }
+    @{ Id='REALiX.HWiNFO';           Name='HWiNFO';         Category='Diagnostics'; Source='winget' }
     @{ Id='CrystalDewWorld.CrystalDiskMark'; Name='CrystalDiskMark'; Category='Benchmark';   Source='winget' }
     @{ Id='Maxon.CinebenchR23';              Name='Cinebench R23';   Category='Benchmark';   Source='winget' }
     @{ Id='3dmark-bundled';                  Name='3DMark (Steel Nomad)'; Category='Benchmark'; Source='zip'
@@ -52,7 +52,7 @@ $script:AppCatalog = @(
 )
 
 $script:DefaultChecked = @(
-    'aida64-extreme','hwinfo','CrystalDewWorld.CrystalDiskMark',
+    'FinalWire.AIDA64.Extreme','REALiX.HWiNFO','CrystalDewWorld.CrystalDiskMark',
     'Maxon.CinebenchR23','3dmark-bundled'
 )
 
@@ -1433,7 +1433,7 @@ function Install-Chocolatey {
 
 function Invoke-WingetInstall { param($App)
     Write-UiLog "Installing $($App.Name) via winget ($($App.Id))..."
-    $p = Start-Process winget -ArgumentList @('install','--id',$App.Id,'--silent',
+    $p = Start-Process winget -ArgumentList @('install','--id',$App.Id,'--source','winget','--silent',
         '--accept-package-agreements','--accept-source-agreements','--disable-interactivity') -Wait -PassThru -NoNewWindow
     switch ($p.ExitCode) {
         0           { Write-UiLog "$($App.Name) installed." 'OK';                   Add-Result $App.Name 'install' 'OK' }
@@ -1444,7 +1444,7 @@ function Invoke-WingetInstall { param($App)
 }
 function Invoke-WingetUninstall { param($App)
     Write-UiLog "Uninstalling $($App.Name) via winget..."
-    $p = Start-Process winget -ArgumentList @('uninstall','--id',$App.Id,'--silent',
+    $p = Start-Process winget -ArgumentList @('uninstall','--id',$App.Id,'--source','winget','--silent',
         '--accept-source-agreements','--disable-interactivity') -Wait -PassThru -NoNewWindow
     switch ($p.ExitCode) {
         0           { Write-UiLog "$($App.Name) uninstalled." 'OK';                  Add-Result $App.Name 'uninstall' 'OK' }
@@ -1880,7 +1880,8 @@ try {
     Set-UiProgress 0
     Add-Content -Path "$env:TEMP\pcbt-pipeline-trace.log" -Value "[$(Get-Date -Format 'HH:mm:ss.fff')] Set-UiProgress returned" -ErrorAction SilentlyContinue
     $sync.RunResults = @()
-    $sync.RunStateList.Dispatcher.Invoke([action]{ $sync.RunStateList.Items.Clear() })
+    $sep = [pscustomobject]@{ App="── $mode  $(Get-Date -Format 'HH:mm') ──"; Action=''; Status=''; Detail='' }
+    $sync.RunStateList.Dispatcher.Invoke([action]{ [void]$sync.RunStateList.Items.Add($sep) })
     $apps   = @($sync.SelectedApps)
     $tweaks = $sync.SelectedTweaks
     $opts   = $sync.SelectedOpts
@@ -2085,7 +2086,8 @@ $switchView = {
     if ($current -ne $target) {
         $current.Content = $null
         $target.Content  = $controls.LogOutput
-        $target.Dispatcher.BeginInvoke([action]{ $target.ScrollToBottom() }, 'Background') | Out-Null
+        $target.UpdateLayout()
+        $target.ScrollToBottom()
     }
 }
 $controls.NavDeploy.Add_Checked(  { & $switchView 'Deploy'   })
